@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
@@ -80,7 +80,7 @@ export function InventoryScreen({
     };
   }, [editOpen]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await fetch(`/api/products?filter=${inventoryFilter}`);
     const data = await response.json();
     setProducts(
@@ -106,12 +106,12 @@ export function InventoryScreen({
         })
       )
     );
-  }
+  }, [inventoryFilter]);
 
   useEffect(() => {
     void refresh();
     setPage(1);
-  }, [inventoryFilter]);
+  }, [refresh]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

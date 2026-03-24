@@ -308,7 +308,7 @@ export async function pushOfflineOperations(
           opId: op.opId,
           opType: op.type,
           status: "processed",
-          payloadJson: op.payload
+          payloadJson: op.payload as Prisma.InputJsonValue
         }
       });
       results.push({ opId: op.opId, status: "processed" });

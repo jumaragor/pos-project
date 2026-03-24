@@ -1,4 +1,4 @@
-import { PendingOpType, Role, StockMovementType } from "@prisma/client";
+import { PendingOpType, Prisma, Role, StockMovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertPermission } from "@/lib/rbac";
 
@@ -126,7 +126,7 @@ export async function repackStock(params: {
         opId: crypto.randomUUID(),
         opType: PendingOpType.REPACK,
         status: "server_record",
-        payloadJson: params as unknown as Record<string, unknown>
+        payloadJson: params as unknown as Prisma.InputJsonValue
       }
     });
     return { success: true };

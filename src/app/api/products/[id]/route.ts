@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { PurchaseStatus, TransactionStatus } from "@prisma/client";
+import { PurchaseStatus } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { badRequest, forbidden, ok, serverError, unauthorized } from "@/lib/http";
