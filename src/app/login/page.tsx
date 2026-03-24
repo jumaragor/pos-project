@@ -8,8 +8,8 @@ import { PrimaryButton } from "@/components/ui/buttons";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("owner@microbiz.local");
-  const [password, setPassword] = useState("Owner123!");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,14 +59,34 @@ export default function LoginPage() {
         <div className="login-card">
           <h2 className="login-card-title">Sign in</h2>
           <p className="login-card-subtitle">Enter your account details to continue.</p>
-          <form className="login-form" onSubmit={handleSubmit}>
+          <form className="login-form" onSubmit={handleSubmit} autoComplete="off">
+            <input
+              type="text"
+              name="fake-username"
+              autoComplete="off"
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{ display: "none" }}
+            />
+            <input
+              type="password"
+              name="fake-password"
+              autoComplete="new-password"
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{ display: "none" }}
+            />
             <label className="login-field">
               <span>Username</span>
               <input
+                type="text"
+                name="username"
                 placeholder="Enter username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="none"
               />
             </label>
             <label className="login-field">
@@ -74,9 +94,10 @@ export default function LoginPage() {
               <input
                 placeholder="Enter password"
                 type={showPassword ? "text" : "password"}
+                name="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
+                autoComplete={showPassword ? "off" : "new-password"}
               />
             </label>
             <div className="login-options">
