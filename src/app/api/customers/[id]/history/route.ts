@@ -7,10 +7,21 @@ export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
   const transactions = await prisma.transaction.findMany({
     where: { customerId: id },
-    include: {
-      items: { include: { product: true } }
+    select: {
+      id: true,
+      number: true,
+      totalAmount: true,
+      status: true,
+      createdAt: true
     },
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
+    take: 20
   });
-  return ok(transactions);
+  return ok(
+    transactions.map((transaction) => ({
+      ...transaction,
+      totalAmount: Number(transaction.totalAmount),
+      createdAt: transaction.createdAt.toISOString()
+    }))
+  );
 }

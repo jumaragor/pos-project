@@ -1,8 +1,9 @@
 "use client";
 
 import { SupplierStatus } from "@prisma/client";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { useToast } from "@/components/toast-provider";
 
 type SupplierRow = {
   id: string;
@@ -27,6 +28,12 @@ type SupplierForm = {
 };
 
 type Mode = "create" | "edit" | "view";
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 
 const emptyForm: SupplierForm = {
   supplierName: "",
@@ -42,34 +49,53 @@ function statusClass(status: SupplierStatus) {
   return status === SupplierStatus.ACTIVE ? "badge purchases-status-posted" : "badge purchases-status-draft";
 }
 
-export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: SupplierRow[] }) {
+export function SuppliersScreen({
+  initialSuppliers,
+  initialPagination
+}: {
+  initialSuppliers: SupplierRow[];
+  initialPagination: PaginationState;
+}) {
+  const { success } = useToast();
   const [suppliers, setSuppliers] = useState(initialSuppliers);
   const [query, setQuery] = useState("");
+  const [pagination, setPagination] = useState(initialPagination);
+  const [loadingList, setLoadingList] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<Mode>("create");
   const [activeSupplier, setActiveSupplier] = useState<SupplierRow | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
 
-  async function refresh() {
-    const response = await fetch("/api/suppliers");
-    const payload = await response.json();
-    setSuppliers(payload);
-  }
+  const loadSuppliers = useCallback(async (page = pagination.page, search = query) => {
+    setLoadingList(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pagination.pageSize)
+      });
+      if (search.trim()) {
+        params.set("q", search.trim());
+      }
+      const response = await fetch(`/api/suppliers?${params.toString()}`);
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        items: SupplierRow[];
+        pagination: PaginationState;
+      };
+      setSuppliers(payload.items);
+      setPagination(payload.pagination);
+    } finally {
+      setLoadingList(false);
+    }
+  }, [pagination.page, pagination.pageSize, query]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return suppliers;
-    return suppliers.filter((supplier) => {
-      return (
-        supplier.supplierCode.toLowerCase().includes(q) ||
-        supplier.supplierName.toLowerCase().includes(q) ||
-        (supplier.contactPerson ?? "").toLowerCase().includes(q) ||
-        (supplier.mobileNumber ?? "").toLowerCase().includes(q) ||
-        (supplier.emailAddress ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [suppliers, query]);
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      void loadSuppliers(1, query);
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [loadSuppliers, query]);
 
   function openCreate() {
     setMode("create");
@@ -128,7 +154,8 @@ export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: Suppli
         return;
       }
       setOpen(false);
-      await refresh();
+      await loadSuppliers(mode === "create" ? 1 : pagination.page, query);
+      success(mode === "edit" ? "Changes saved successfully" : "Record saved successfully");
     } finally {
       setSaving(false);
     }
@@ -143,7 +170,8 @@ export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: Suppli
       alert(payload.error ?? "Failed to deactivate supplier");
       return;
     }
-    await refresh();
+    await loadSuppliers(pagination.page, query);
+    success("Processed successfully");
   }
 
   const readOnly = mode === "view";
@@ -180,7 +208,14 @@ export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: Suppli
               </tr>
             </thead>
             <tbody>
-              {filtered.map((supplier) => (
+              {loadingList ? (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    Loading suppliers...
+                  </td>
+                </tr>
+              ) : (
+                suppliers.map((supplier) => (
                 <tr key={supplier.id}>
                   <td>{supplier.supplierCode}</td>
                   <td>{supplier.supplierName}</td>
@@ -206,8 +241,8 @@ export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: Suppli
                     </div>
                   </td>
                 </tr>
-              ))}
-              {!filtered.length ? (
+              )))}
+              {!loadingList && !suppliers.length ? (
                 <tr>
                   <td colSpan={7} className="muted">
                     No suppliers yet.
@@ -216,6 +251,32 @@ export function SuppliersScreen({ initialSuppliers }: { initialSuppliers: Suppli
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="inventory-pagination">
+          <div>
+            Showing {suppliers.length ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to{" "}
+            {(pagination.page - 1) * pagination.pageSize + suppliers.length} of {pagination.total}
+          </div>
+          <div className="row">
+            <button
+              className="btn-secondary"
+              disabled={pagination.page <= 1 || loadingList}
+              onClick={() => void loadSuppliers(pagination.page - 1, query)}
+            >
+              Prev
+            </button>
+            <span className="badge">
+              Page {pagination.page} / {pagination.totalPages}
+            </span>
+            <button
+              className="btn-secondary"
+              disabled={pagination.page >= pagination.totalPages || loadingList}
+              onClick={() => void loadSuppliers(pagination.page + 1, query)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

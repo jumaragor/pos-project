@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { badRequest, ok, serverError, unauthorized } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
+import { getProductSettings } from "@/lib/product-settings";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,10 @@ async function handleUpload(request: NextRequest, { params }: Params) {
     const actor = await getAuthUser();
     if (!actor) {
       return unauthorized();
+    }
+    const settings = await getProductSettings();
+    if (!settings.allowProductPhotoUpload) {
+      return badRequest("Product photo upload is disabled in Configuration.");
     }
     const formData = await request.formData();
     const file = formData.get("file");

@@ -30,14 +30,19 @@ const links = [
 
 export function Sidebar({
   collapsed,
-  onToggle
+  onToggle,
+  mobileOpen,
+  onMobileClose
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }) {
   const { data } = useSession();
   const pathname = usePathname();
   const role = data?.user?.role;
+  const effectiveCollapsed = mobileOpen ? false : collapsed;
   const visibleLinks = links.filter((link) => (!role ? true : link.roles.includes(role)));
   const [storeName, setStoreName] = useState("MicroBiz POS");
   const [storeLogoUrl, setStoreLogoUrl] = useState("");
@@ -75,7 +80,23 @@ export function Sidebar({
   }, []);
 
   return (
-    <aside className={collapsed ? "sidebar collapsed" : "sidebar"}>
+    <>
+    <div
+      className={mobileOpen ? "sidebar-backdrop open" : "sidebar-backdrop"}
+      onClick={onMobileClose}
+      aria-hidden="true"
+    />
+    <aside
+      className={
+        mobileOpen
+          ? effectiveCollapsed
+            ? "sidebar collapsed mobile-open"
+            : "sidebar mobile-open"
+          : effectiveCollapsed
+            ? "sidebar collapsed"
+            : "sidebar"
+      }
+    >
       <div className="sidebar-logo">
         <div className="sidebar-brand">
           <div className="sidebar-logo-slot" aria-hidden="true">
@@ -91,7 +112,7 @@ export function Sidebar({
               <LogoMarkIcon className="sidebar-logo-mark" />
             )}
           </div>
-          {!collapsed ? (
+          {!effectiveCollapsed ? (
             <div>
               <h2 className="sidebar-title">{resolvedStoreName}</h2>
             </div>
@@ -101,10 +122,10 @@ export function Sidebar({
           type="button"
           className="sidebar-toggle"
           onClick={onToggle}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <ChevronRightIcon className="sidebar-icon" /> : <ChevronLeftIcon className="sidebar-icon" />}
+          {effectiveCollapsed ? <ChevronRightIcon className="sidebar-icon" /> : <ChevronLeftIcon className="sidebar-icon" />}
         </button>
       </div>
       <nav className="sidebar-nav">
@@ -114,16 +135,18 @@ export function Sidebar({
             <Link
               key={href}
               href={href}
-              title={collapsed ? label : undefined}
+              title={effectiveCollapsed ? label : undefined}
               className={active ? "nav-item active" : "nav-item"}
+              onClick={onMobileClose}
             >
               <Icon className="sidebar-icon" />
               <span className="nav-label">{label}</span>
-              {collapsed ? <span className="nav-tooltip">{label}</span> : null}
+              {effectiveCollapsed ? <span className="nav-tooltip">{label}</span> : null}
             </Link>
           );
         })}
       </nav>
     </aside>
+    </>
   );
 }

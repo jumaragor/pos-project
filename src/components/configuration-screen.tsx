@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { useToast } from "@/components/toast-provider";
 import {
   applyThemeToDocument,
   defaultThemeValues,
@@ -20,6 +21,7 @@ type TabKey =
   | "pos"
   | "store"
   | "product"
+  | "categories"
   | "system";
 
 type UserRow = {
@@ -40,6 +42,25 @@ type UserForm = {
   confirmPassword: string;
   role: "ADMIN" | "CASHIER";
   status: UserStatus;
+};
+type CategoryRow = {
+  id: string;
+  name: string;
+  code: string;
+  skuPrefix: string;
+  description: string | null;
+  status: "ACTIVE" | "INACTIVE";
+  sortOrder: number;
+  productCount: number;
+};
+
+type CategoryForm = {
+  name: string;
+  code: string;
+  skuPrefix: string;
+  description: string;
+  status: "ACTIVE" | "INACTIVE";
+  sortOrder: number;
 };
 
 type SettingsShape = {
@@ -72,6 +93,7 @@ type SettingsShape = {
   allowProductPhotoUpload: boolean;
   requireSKU: boolean;
   autoGenerateSKU: boolean;
+  skuGenerationMode: "MANUAL" | "GLOBAL" | "CATEGORY_BASED";
   currency: "PHP";
   dateFormat: "MM/DD/YYYY" | "DD/MM/YYYY" | "YYYY-MM-DD";
   numberFormat: "1,000.00" | "1.000,00";
@@ -90,6 +112,7 @@ const tabMeta: { key: TabKey; label: string }[] = [
   { key: "pos", label: "POS Settings" },
   { key: "store", label: "Store Information" },
   { key: "product", label: "Product Settings" },
+  { key: "categories", label: "Categories" },
   { key: "system", label: "System Preferences" }
 ];
 
@@ -123,6 +146,7 @@ const defaultSettings: SettingsShape = {
   allowProductPhotoUpload: true,
   requireSKU: true,
   autoGenerateSKU: false,
+  skuGenerationMode: "GLOBAL",
   currency: "PHP",
   dateFormat: "MM/DD/YYYY",
   numberFormat: "1,000.00",
@@ -142,6 +166,14 @@ const emptyUserForm: UserForm = {
   confirmPassword: "",
   role: "CASHIER",
   status: UserStatus.ACTIVE
+};
+const emptyCategoryForm: CategoryForm = {
+  name: "",
+  code: "",
+  skuPrefix: "",
+  description: "",
+  status: "ACTIVE",
+  sortOrder: 0
 };
 
 function toUiRole(role: Role): "ADMIN" | "CASHIER" {
@@ -166,15 +198,29 @@ const themePresetOptions: Array<{ value: ThemePresetKey; label: string }> = [
   { value: "CUSTOM", label: "Custom" }
 ];
 
+function centeredConfigurationForm(content: React.ReactNode) {
+  return (
+    <div className="configuration-form-shell">
+      <div className="card configuration-panel configuration-form-card">{content}</div>
+    </div>
+  );
+}
+
 export function ConfigurationScreen() {
   const { data } = useSession();
+  const { success } = useToast();
   const [activeTab, setActiveTab] = useState<TabKey>("users");
   const [settings, setSettings] = useState<SettingsShape>(defaultSettings);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [userOpen, setUserOpen] = useState(false);
   const [userMode, setUserMode] = useState<"create" | "edit">("create");
   const [activeUser, setActiveUser] = useState<UserRow | null>(null);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryMode, setCategoryMode] = useState<"create" | "edit">("create");
+  const [activeCategory, setActiveCategory] = useState<CategoryRow | null>(null);
+  const [categoryForm, setCategoryForm] = useState<CategoryForm>(emptyCategoryForm);
 
   const isAdmin = ["OWNER", "MANAGER"].includes(data?.user?.role ?? "");
 
@@ -191,9 +237,17 @@ export function ConfigurationScreen() {
     setUsers(payload);
   }
 
+  async function loadCategories() {
+    const response = await fetch("/api/categories?pageSize=100");
+    if (!response.ok) return;
+    const payload = (await response.json()) as { items: CategoryRow[] };
+    setCategories(payload.items);
+  }
+
   useEffect(() => {
     void loadSettings();
     void loadUsers();
+    void loadCategories();
   }, []);
 
   function openCreateUser() {
@@ -201,6 +255,27 @@ export function ConfigurationScreen() {
     setActiveUser(null);
     setUserForm(emptyUserForm);
     setUserOpen(true);
+  }
+
+  function openCreateCategory() {
+    setCategoryMode("create");
+    setActiveCategory(null);
+    setCategoryForm(emptyCategoryForm);
+    setCategoryOpen(true);
+  }
+
+  function openEditCategory(category: CategoryRow) {
+    setCategoryMode("edit");
+    setActiveCategory(category);
+    setCategoryForm({
+      name: category.name,
+      code: category.code,
+      skuPrefix: category.skuPrefix,
+      description: category.description ?? "",
+      status: category.status,
+      sortOrder: category.sortOrder
+    });
+    setCategoryOpen(true);
   }
 
   function openEditUser(user: UserRow) {
@@ -260,6 +335,71 @@ export function ConfigurationScreen() {
     }
     setUserOpen(false);
     await loadUsers();
+    success(userMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
+  }
+
+  async function saveCategory() {
+    if (!categoryForm.name.trim() || !categoryForm.code.trim() || !categoryForm.skuPrefix.trim()) {
+      alert("Category Name, Category Code, and SKU Prefix are required.");
+      return;
+    }
+    const endpoint =
+      categoryMode === "edit" && activeCategory ? `/api/categories/${activeCategory.id}` : "/api/categories";
+    const method = categoryMode === "edit" ? "PUT" : "POST";
+    const response = await fetch(endpoint, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: categoryForm.name.trim(),
+        code: categoryForm.code.trim().toUpperCase(),
+        skuPrefix: categoryForm.skuPrefix.trim().toUpperCase(),
+        description: categoryForm.description.trim(),
+        status: categoryForm.status,
+        sortOrder: categoryForm.sortOrder
+      })
+    });
+    if (!response.ok) {
+      const payload = await response.json();
+      alert(payload.error ?? "Failed to save category.");
+      return;
+    }
+    setCategoryOpen(false);
+    await loadCategories();
+    success(categoryMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
+  }
+
+  async function toggleCategoryStatus(category: CategoryRow) {
+    const response = await fetch(`/api/categories/${category.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: category.name,
+        code: category.code,
+        skuPrefix: category.skuPrefix,
+        description: category.description ?? "",
+        status: category.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+        sortOrder: category.sortOrder
+      })
+    });
+    if (!response.ok) {
+      const payload = await response.json();
+      alert(payload.error ?? "Failed to update category status.");
+      return;
+    }
+    await loadCategories();
+    success("Process successful");
+  }
+
+  async function deleteCategory(category: CategoryRow) {
+    if (!window.confirm(`Delete category ${category.name}?`)) return;
+    const response = await fetch(`/api/categories/${category.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const payload = await response.json();
+      alert(payload.error ?? "Failed to delete category.");
+      return;
+    }
+    await loadCategories();
+    success("Deleted successfully");
   }
 
   async function toggleUserStatus(user: UserRow) {
@@ -281,9 +421,10 @@ export function ConfigurationScreen() {
       return;
     }
     await loadUsers();
+    success("Process successful");
   }
 
-  async function saveSettings(keys: (keyof SettingsShape)[]) {
+  async function saveSettings(keys: (keyof SettingsShape)[], successMessage = "Changes saved successfully") {
     const payload = Object.fromEntries(keys.map((key) => [key, settings[key]]));
     const response = await fetch("/api/settings", {
       method: "PUT",
@@ -297,7 +438,7 @@ export function ConfigurationScreen() {
     const json = (await response.json()) as SettingsShape;
     setSettings((prev) => ({ ...prev, ...json }));
     window.dispatchEvent(new Event("microbiz:settings-updated"));
-    alert("Configuration saved.");
+    success(successMessage);
   }
 
   function validateThemeValues() {
@@ -369,7 +510,13 @@ export function ConfigurationScreen() {
 
   function renderContent() {
     if (!isAdmin) {
-      return <div className="card">Access denied. Only Admin can access Configuration.</div>;
+      return (
+        <div className="configuration-form-shell">
+          <div className="card configuration-form-card">
+            Access denied. Only Admin can access Configuration.
+          </div>
+        </div>
+      );
     }
     switch (activeTab) {
       case "users":
@@ -425,8 +572,8 @@ export function ConfigurationScreen() {
           </div>
         );
       case "inventory":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">Inventory Controls</h2>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowNegativeStock} onChange={(e) => setSettings((p) => ({ ...p, allowNegativeStock: e.target.checked }))} />Allow Negative Stock</label>
             <label className="form-field"><span className="field-label">Low Stock Threshold</span><input type="number" value={settings.lowStockThreshold} onChange={(e) => setSettings((p) => ({ ...p, lowStockThreshold: Number(e.target.value) }))} /></label>
@@ -449,11 +596,11 @@ export function ConfigurationScreen() {
                 Save Changes
               </PrimaryButton>
             </div>
-          </div>
+          </>
         );
       case "tax":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">Tax Settings</h2>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableTax} onChange={(e) => setSettings((p) => ({ ...p, enableTax: e.target.checked }))} />Enable Tax</label>
             <label className="form-field"><span className="field-label">Default Tax Rate (%)</span><input type="number" value={settings.defaultTaxRate} onChange={(e) => setSettings((p) => ({ ...p, defaultTaxRate: Number(e.target.value) }))} /></label>
@@ -474,11 +621,11 @@ export function ConfigurationScreen() {
                 Save Changes
               </PrimaryButton>
             </div>
-          </div>
+          </>
         );
       case "pos":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">POS Settings</h2>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableBarcodeScanner} onChange={(e) => setSettings((p) => ({ ...p, enableBarcodeScanner: e.target.checked }))} />Enable Barcode Scanner</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowPriceOverride} onChange={(e) => setSettings((p) => ({ ...p, allowPriceOverride: e.target.checked }))} />Allow Price Override</label>
@@ -489,11 +636,11 @@ export function ConfigurationScreen() {
             <div className="configuration-actions">
               <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "defaultPaymentMethod", "requireCustomerBeforeSale"])}>Save Changes</PrimaryButton>
             </div>
-          </div>
+          </>
         );
       case "store":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">Store Information</h2>
             <label className="form-field"><span className="field-label">Store Name</span><input value={settings.storeName} onChange={(e) => setSettings((p) => ({ ...p, storeName: e.target.value }))} /></label>
             <label className="form-field"><span className="field-label">Business Name</span><input value={settings.businessName} onChange={(e) => setSettings((p) => ({ ...p, businessName: e.target.value }))} /></label>
@@ -509,25 +656,110 @@ export function ConfigurationScreen() {
             <div className="configuration-actions">
               <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["storeName", "businessName", "storeAddress", "storeContactNumber", "storeEmailAddress", "storeLogoUrl", "receiptFooterMessage", "tin", "permitNo"])}>Save Changes</PrimaryButton>
             </div>
-          </div>
+          </>
         );
       case "product":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">Product Settings</h2>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableProductCategories} onChange={(e) => setSettings((p) => ({ ...p, enableProductCategories: e.target.checked }))} />Enable Product Categories</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableCompatibleUnits} onChange={(e) => setSettings((p) => ({ ...p, enableCompatibleUnits: e.target.checked }))} />Enable Compatible Units</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowProductPhotoUpload} onChange={(e) => setSettings((p) => ({ ...p, allowProductPhotoUpload: e.target.checked }))} />Allow Product Photo Upload</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.requireSKU} onChange={(e) => setSettings((p) => ({ ...p, requireSKU: e.target.checked }))} />Require SKU</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.autoGenerateSKU} onChange={(e) => setSettings((p) => ({ ...p, autoGenerateSKU: e.target.checked }))} />Auto Generate SKU</label>
+            <label className="form-field">
+              <span className="field-label">SKU Generation Mode</span>
+              <select
+                value={settings.skuGenerationMode}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skuGenerationMode: e.target.value as SettingsShape["skuGenerationMode"]
+                  }))
+                }
+              >
+                <option value="MANUAL">Manual</option>
+                <option value="GLOBAL">Global</option>
+                <option value="CATEGORY_BASED">Category-Based</option>
+              </select>
+            </label>
             <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableProductCategories", "enableCompatibleUnits", "allowProductPhotoUpload", "requireSKU", "autoGenerateSKU"])}>Save Changes</PrimaryButton>
+              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableProductCategories", "enableCompatibleUnits", "allowProductPhotoUpload", "requireSKU", "autoGenerateSKU", "skuGenerationMode"], "Product settings updated successfully")}>Save Changes</PrimaryButton>
+            </div>
+          </>
+        );
+      case "categories":
+        return (
+          <div className="card">
+            <div className="inventory-table-head">
+              <h2 className="section-title">Categories</h2>
+              <PrimaryButton className="configuration-inline-btn" onClick={openCreateCategory}>
+                + Add Category
+              </PrimaryButton>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category Code</th>
+                    <th>Category Name</th>
+                    <th>SKU Prefix</th>
+                    <th>Status</th>
+                    <th>Description</th>
+                    <th>Products</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categories.map((category) => (
+                    <tr key={category.id}>
+                      <td>{category.code}</td>
+                      <td>{category.name}</td>
+                      <td>{category.skuPrefix}</td>
+                      <td>
+                        <span className={category.status === "ACTIVE" ? "badge purchases-status-posted" : "badge purchases-status-draft"}>
+                          {category.status}
+                        </span>
+                      </td>
+                      <td>{category.description || "-"}</td>
+                      <td>{category.productCount}</td>
+                      <td>
+                        <div className="inventory-actions">
+                          <button className="btn-secondary" onClick={() => openEditCategory(category)}>
+                            Edit
+                          </button>
+                          <button
+                            className={category.status === "ACTIVE" ? "btn-danger" : "btn-success"}
+                            onClick={() => toggleCategoryStatus(category)}
+                          >
+                            {category.status === "ACTIVE" ? "Deactivate" : "Activate"}
+                          </button>
+                          <button
+                            className="btn-danger"
+                            disabled={category.productCount > 0}
+                            onClick={() => deleteCategory(category)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!categories.length ? (
+                    <tr>
+                      <td colSpan={7} className="muted">
+                        No categories yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </div>
         );
       case "system":
-        return (
-          <div className="card configuration-panel">
+        return centeredConfigurationForm(
+          <>
             <h2 className="section-title">System Preferences</h2>
             <label className="form-field"><span className="field-label">Currency</span><select value={settings.currency} onChange={(e) => setSettings((p) => ({ ...p, currency: e.target.value as "PHP" }))}><option value="PHP">PHP</option></select></label>
             <label className="form-field"><span className="field-label">Date Format</span><select value={settings.dateFormat} onChange={(e) => setSettings((p) => ({ ...p, dateFormat: e.target.value as SettingsShape["dateFormat"] }))}><option value="MM/DD/YYYY">MM/DD/YYYY</option><option value="DD/MM/YYYY">DD/MM/YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></label>
@@ -625,7 +857,7 @@ export function ConfigurationScreen() {
               </div>
               <PrimaryButton className="configuration-save-btn" onClick={saveSystemSettings}>Save Changes</PrimaryButton>
             </div>
-          </div>
+          </>
         );
       default:
         return null;
@@ -670,6 +902,82 @@ export function ConfigurationScreen() {
             <div className="row" style={{ marginTop: 12 }}>
               <SecondaryButton onClick={() => setUserOpen(false)}>Cancel</SecondaryButton>
               <PrimaryButton onClick={saveUser}>Save User</PrimaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {categoryOpen ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal">
+            <h3 className="section-title">{categoryMode === "create" ? "Add Category" : "Edit Category"}</h3>
+            <div className="stack">
+              <label className="form-field">
+                <span className="field-label">Category Name</span>
+                <input
+                  value={categoryForm.name}
+                  onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))}
+                />
+              </label>
+              <div className="grid grid-2">
+                <label className="form-field">
+                  <span className="field-label">Category Code</span>
+                  <input
+                    value={categoryForm.code}
+                    onChange={(e) =>
+                      setCategoryForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  <span className="field-label">SKU Prefix</span>
+                  <input
+                    value={categoryForm.skuPrefix}
+                    onChange={(e) =>
+                      setCategoryForm((p) => ({ ...p, skuPrefix: e.target.value.toUpperCase() }))
+                    }
+                  />
+                  <div className="field-help">
+                    SKU preview: {(categoryForm.skuPrefix || "CAT").toUpperCase()}-0001
+                  </div>
+                </label>
+              </div>
+              <label className="form-field">
+                <span className="field-label">Description</span>
+                <textarea
+                  rows={2}
+                  value={categoryForm.description}
+                  onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))}
+                />
+              </label>
+              <div className="grid grid-2">
+                <label className="form-field">
+                  <span className="field-label">Status</span>
+                  <select
+                    value={categoryForm.status}
+                    onChange={(e) =>
+                      setCategoryForm((p) => ({ ...p, status: e.target.value as CategoryForm["status"] }))
+                    }
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span className="field-label">Sort Order</span>
+                  <input
+                    type="number"
+                    value={categoryForm.sortOrder}
+                    onChange={(e) =>
+                      setCategoryForm((p) => ({ ...p, sortOrder: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="row" style={{ marginTop: 12 }}>
+              <SecondaryButton onClick={() => setCategoryOpen(false)}>Cancel</SecondaryButton>
+              <PrimaryButton onClick={saveCategory}>Save Category</PrimaryButton>
             </div>
           </div>
         </div>

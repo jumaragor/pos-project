@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { badRequest, forbidden, ok, serverError, unauthorized } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
 import { can } from "@/lib/rbac";
+import { generateProductSku, getProductSettings } from "@/lib/product-settings";
+import { getInventorySettings } from "@/lib/inventory-settings";
+import { isVoidedPurchaseNote } from "@/lib/purchase-utils";
+import { TransactionStatus } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,22 +20,54 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     const { id } = await params;
     const body = await request.json();
+    const settings = await getProductSettings();
     if (
       (typeof body.costPrice === "number" || typeof body.sellingPrice === "number") &&
       !can(actor.role, "EDIT_PRICING")
     ) {
       return forbidden();
     }
+    const existingProduct = await prisma.product.findUnique({ where: { id } });
+    if (!existingProduct) {
+      return badRequest("Product not found");
+    }
+    const categoryId = typeof body.categoryId === "string" && body.categoryId.trim() ? body.categoryId : null;
+    const category = categoryId
+      ? await prisma.category.findUnique({
+          where: { id: categoryId },
+          select: { id: true, name: true, status: true }
+        })
+      : null;
+    if (categoryId && !category) {
+      return badRequest("Selected category does not exist");
+    }
+    if (category && category.status !== "ACTIVE" && existingProduct.categoryId !== categoryId) {
+      return badRequest("Inactive categories cannot be assigned to products");
+    }
+    const trimmedSku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
+    if (!trimmedSku && settings.requireSKU && !settings.autoGenerateSKU && !existingProduct.sku) {
+      return badRequest("SKU is required");
+    }
+    const sku =
+      trimmedSku ||
+      existingProduct.sku ||
+      (settings.autoGenerateSKU || !settings.requireSKU ? await generateProductSku(categoryId) : "");
+    if (!sku) {
+      return badRequest("SKU is required");
+    }
     const product = await prisma.product.update({
       where: { id },
       data: {
         name: body.name,
-        sku: body.sku,
+        sku,
         description: body.description,
-        compatibleUnits: body.compatibleUnits,
+        compatibleUnits: settings.enableCompatibleUnits
+          ? body.compatibleUnits
+          : existingProduct.compatibleUnits,
         barcode: body.barcode,
         photoUrl: body.photoUrl,
-        category: body.category,
+        categoryId: settings.enableProductCategories ? categoryId : existingProduct.categoryId,
+        category: settings.enableProductCategories ? category?.name ?? existingProduct.category : existingProduct.category,
         unit: body.unit,
         costPrice: body.costPrice,
         sellingPrice: body.sellingPrice,
@@ -68,12 +104,20 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       return forbidden();
     }
     const { id } = await params;
+    const inventorySettings = await getInventorySettings();
+    if (!inventorySettings.allowProductDeletion) {
+      return badRequest("Product deletion is disabled in Configuration.");
+    }
 
-    const [product, salesRefCount, purchaseRefCount, movementRefCount, activeDraftRefCount] = await Promise.all([
+    const [product, activeSalesRefCount, purchases, activeDraftRefCount] = await Promise.all([
       prisma.product.findUnique({ where: { id }, select: { stockQty: true } }),
-      prisma.transactionItem.count({ where: { productId: id } }),
-      prisma.purchaseItem.count({ where: { productId: id } }),
-      prisma.stockMovement.count({ where: { productId: id } }),
+      prisma.transactionItem.count({
+        where: { productId: id, transaction: { status: TransactionStatus.COMPLETED } }
+      }),
+      prisma.purchase.findMany({
+        where: { items: { some: { productId: id } } },
+        select: { status: true, notes: true }
+      }),
       prisma.purchaseItem.count({
         where: { productId: id, purchase: { status: PurchaseStatus.DRAFT } }
       })
@@ -84,11 +128,14 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
 
     const hasStock = Number(product.stockQty) !== 0;
-    const hasHistory =
-      salesRefCount > 0 || purchaseRefCount > 0 || movementRefCount > 0 || activeDraftRefCount > 0;
-    if (hasStock || hasHistory) {
+    const activePurchaseRefCount = purchases.filter(
+      (purchase) => purchase.status === PurchaseStatus.POSTED && !isVoidedPurchaseNote(purchase.notes)
+    ).length;
+    const hasActiveReferences =
+      activeSalesRefCount > 0 || activePurchaseRefCount > 0 || activeDraftRefCount > 0;
+    if (hasStock || hasActiveReferences) {
       return badRequest(
-        "This item cannot be permanently deleted because it has inventory or transaction history. Archive it instead."
+        "This item cannot be deleted because it is referenced by active sales or purchase transactions. Void the related transactions first or mark the item as inactive."
       );
     }
 

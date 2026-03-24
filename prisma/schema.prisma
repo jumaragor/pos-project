@@ -55,6 +55,11 @@ enum SupplierStatus {
   INACTIVE
 }
 
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -74,6 +79,7 @@ model Product {
   id                String            @id @default(cuid())
   name              String
   sku               String            @unique
+  categoryId        String?
   category          String
   description       String?
   compatibleUnits   String?
@@ -88,10 +94,24 @@ model Product {
   lowStockThreshold Decimal           @db.Decimal(12, 3) @default(0)
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+  categoryRef       Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   items             TransactionItem[]
   purchaseItems     PurchaseItem[]
   stockMoves        StockMovement[]
   conversionRules   UnitConversionRule[]
+}
+
+model Category {
+  id          String         @id @default(cuid())
+  name        String
+  code        String         @unique
+  skuPrefix   String         @unique
+  description String?
+  status      CategoryStatus @default(ACTIVE)
+  sortOrder   Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  products    Product[]
 }
 
 model Customer {

@@ -11,12 +11,18 @@ export async function POST(request: NextRequest) {
     }
     const created = [];
     for (const row of rows) {
+      const categoryName = row.category ?? "General";
+      const category = await prisma.category.findFirst({
+        where: { name: { equals: categoryName, mode: "insensitive" } },
+        select: { id: true, name: true }
+      });
       const product = await prisma.product.upsert({
         where: { sku: row.sku },
         update: {
           name: row.name,
           barcode: row.barcode,
-          category: row.category ?? "General",
+          categoryId: category?.id ?? null,
+          category: category?.name ?? categoryName,
           unit: row.unit ?? "pc",
           costPrice: Number(row.cost_price ?? 0),
           sellingPrice: Number(row.selling_price ?? 0),
@@ -27,7 +33,8 @@ export async function POST(request: NextRequest) {
           name: row.name,
           sku: row.sku,
           barcode: row.barcode,
-          category: row.category ?? "General",
+          categoryId: category?.id ?? null,
+          category: category?.name ?? categoryName,
           unit: row.unit ?? "pc",
           costPrice: Number(row.cost_price ?? 0),
           sellingPrice: Number(row.selling_price ?? 0),

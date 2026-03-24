@@ -5,6 +5,7 @@ export type ProductLite = {
   name: string;
   sku: string;
   category?: string | null;
+  compatibleUnits?: string | null;
   barcode?: string | null;
   photoUrl?: string | null;
   sellingPrice: number;

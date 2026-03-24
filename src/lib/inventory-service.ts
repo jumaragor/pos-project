@@ -1,6 +1,7 @@
 import { PendingOpType, Prisma, Role, StockMovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertPermission } from "@/lib/rbac";
+import { getInventorySettings } from "@/lib/inventory-settings";
 
 export async function stockInProduct(params: {
   productId: string;
@@ -37,15 +38,18 @@ export async function adjustStock(params: {
   role: Role;
 }) {
   assertPermission(params.role, "INVENTORY_ADJUST");
+  const settings = await getInventorySettings();
+  if (!settings.allowManualStockAdjustments) {
+    throw new Error("Manual stock adjustments are disabled");
+  }
   return prisma.$transaction(async (tx) => {
     const product = await tx.product.findUnique({ where: { id: params.productId } });
     if (!product) {
       throw new Error("Product not found");
     }
     const next = Number(product.stockQty) + params.qtyDelta;
-    const allowNegative = (await tx.appSetting.findUnique({ where: { key: "allowNegativeStock" } }))?.value;
-    if (allowNegative !== "true" && next < 0) {
-      throw new Error("Negative stock is not allowed");
+    if (!settings.allowNegativeStock && next < 0) {
+      throw new Error("Insufficient stock");
     }
     await tx.product.update({
       where: { id: product.id },
@@ -82,6 +86,7 @@ export async function repackStock(params: {
   role: Role;
 }) {
   assertPermission(params.role, "INVENTORY_ADJUST");
+  const settings = await getInventorySettings();
   return prisma.$transaction(async (tx) => {
     const [source, target] = await Promise.all([
       tx.product.findUnique({ where: { id: params.sourceProductId } }),
@@ -91,8 +96,7 @@ export async function repackStock(params: {
       throw new Error("Invalid source/target product");
     }
     const targetQty = params.sourceQty * params.factor;
-    const allowNegative = (await tx.appSetting.findUnique({ where: { key: "allowNegativeStock" } }))?.value;
-    if (allowNegative !== "true" && Number(source.stockQty) - params.sourceQty < 0) {
+    if (!settings.allowNegativeStock && Number(source.stockQty) - params.sourceQty < 0) {
       throw new Error("Insufficient source stock");
     }
     await tx.product.update({

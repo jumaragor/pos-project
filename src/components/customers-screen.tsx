@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { useToast } from "@/components/toast-provider";
 
 type Customer = {
   id: string;
   name: string;
   mobile: string;
+  totalPurchases: number;
+  totalVisits: number;
+  lastVisit: string | null;
 };
 
 type HistoryItem = {
@@ -17,11 +21,11 @@ type HistoryItem = {
   createdAt: string;
 };
 
-type CustomerMetric = {
-  customerId: string;
-  totalPurchases: number;
-  totalVisits: number;
-  lastVisit: string | null;
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 };
 
 type AddCustomerForm = {
@@ -51,13 +55,21 @@ function formatDateTime(value: string | null) {
   });
 }
 
-export function CustomersScreen({ initialCustomers }: { initialCustomers: Customer[] }) {
+export function CustomersScreen({
+  initialCustomers,
+  initialPagination
+}: {
+  initialCustomers: Customer[];
+  initialPagination: PaginationState;
+}) {
+  const { success } = useToast();
   const [customers, setCustomers] = useState(initialCustomers);
   const [query, setQuery] = useState("");
-  const [metricsByCustomerId, setMetricsByCustomerId] = useState<Record<string, CustomerMetric>>({});
+  const [pagination, setPagination] = useState(initialPagination);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [addForm, setAddForm] = useState<AddCustomerForm>({
@@ -67,38 +79,41 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
     address: ""
   });
 
-  async function loadMetrics() {
-    const response = await fetch("/api/customers/metrics");
-    if (!response.ok) return;
-    const rows = (await response.json()) as CustomerMetric[];
-    const mapped = rows.reduce<Record<string, CustomerMetric>>((acc, item) => {
-      acc[item.customerId] = item;
-      return acc;
-    }, {});
-    setMetricsByCustomerId(mapped);
-  }
-
-  async function refreshCustomers() {
-    const response = await fetch("/api/customers");
-    const data = (await response.json()) as Customer[];
-    setCustomers(data);
-  }
-
-  async function refreshAll() {
-    await Promise.all([refreshCustomers(), loadMetrics()]);
-  }
+  const loadCustomers = useCallback(async (page = pagination.page, search = query) => {
+    setLoadingList(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pagination.pageSize)
+      });
+      if (search.trim()) {
+        params.set("q", search.trim());
+      }
+      const response = await fetch(`/api/customers?${params.toString()}`);
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        items: Customer[];
+        pagination: PaginationState;
+      };
+      setCustomers(payload.items);
+      setPagination(payload.pagination);
+    } finally {
+      setLoadingList(false);
+    }
+  }, [pagination.page, pagination.pageSize, query]);
 
   useEffect(() => {
-    void loadMetrics();
-  }, []);
+    const handle = window.setTimeout(() => {
+      void loadCustomers(1, query);
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [loadCustomers, query]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return customers;
-    return customers.filter((customer) => {
-      return customer.name.toLowerCase().includes(q) || customer.mobile.toLowerCase().includes(q);
-    });
-  }, [customers, query]);
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    const nextSelected = customers.find((customer) => customer.id === selectedCustomer.id) ?? null;
+    setSelectedCustomer(nextSelected);
+  }, [customers, selectedCustomer]);
 
   async function openCustomer(customer: Customer) {
     setSelectedCustomer(customer);
@@ -145,16 +160,16 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
         return;
       }
       setIsAddOpen(false);
-      await refreshAll();
+      await loadCustomers(1, query);
+      success("Record saved successfully");
     } finally {
       setIsSaving(false);
     }
   }
 
-  const selectedMetric = selectedCustomer ? metricsByCustomerId[selectedCustomer.id] : undefined;
-  const selectedTotalPurchases = selectedMetric?.totalPurchases ?? 0;
-  const selectedTotalVisits = selectedMetric?.totalVisits ?? history.length;
-  const selectedLastVisit = selectedMetric?.lastVisit ?? history[0]?.createdAt ?? null;
+  const selectedTotalPurchases = selectedCustomer?.totalPurchases ?? 0;
+  const selectedTotalVisits = selectedCustomer?.totalVisits ?? history.length;
+  const selectedLastVisit = selectedCustomer?.lastVisit ?? history[0]?.createdAt ?? null;
 
   return (
     <div className="customers-layout">
@@ -187,8 +202,14 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
               </tr>
             </thead>
             <tbody>
-              {filtered.map((customer) => {
-                const metric = metricsByCustomerId[customer.id];
+              {loadingList ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    Loading customers...
+                  </td>
+                </tr>
+              ) : (
+                customers.map((customer) => {
                 const isActive = selectedCustomer?.id === customer.id;
                 return (
                   <tr
@@ -198,8 +219,8 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
                   >
                     <td>{customer.name}</td>
                     <td>{customer.mobile}</td>
-                    <td>{formatMoney(metric?.totalPurchases ?? 0)}</td>
-                    <td>{formatDateTime(metric?.lastVisit ?? null)}</td>
+                    <td>{formatMoney(customer.totalPurchases ?? 0)}</td>
+                    <td>{formatDateTime(customer.lastVisit ?? null)}</td>
                     <td>
                       <button
                         className="btn-info"
@@ -213,8 +234,8 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
                     </td>
                   </tr>
                 );
-              })}
-              {!filtered.length ? (
+              }))}
+              {!loadingList && !customers.length ? (
                 <tr>
                   <td colSpan={5} className="muted">
                     No customers found.
@@ -223,6 +244,32 @@ export function CustomersScreen({ initialCustomers }: { initialCustomers: Custom
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="inventory-pagination">
+          <div>
+            Showing {customers.length ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to{" "}
+            {(pagination.page - 1) * pagination.pageSize + customers.length} of {pagination.total}
+          </div>
+          <div className="row">
+            <button
+              className="btn-secondary"
+              disabled={pagination.page <= 1 || loadingList}
+              onClick={() => void loadCustomers(pagination.page - 1, query)}
+            >
+              Prev
+            </button>
+            <span className="badge">
+              Page {pagination.page} / {pagination.totalPages}
+            </span>
+            <button
+              className="btn-secondary"
+              disabled={pagination.page >= pagination.totalPages || loadingList}
+              onClick={() => void loadCustomers(pagination.page + 1, query)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </section>
 

@@ -5,11 +5,13 @@ import { PaymentMethod } from "@prisma/client";
 import { db } from "@/lib/offline-db";
 import { applyDiscount } from "@/lib/pricing";
 import { ProductGrid } from "@/components/pos/product-grid";
+import { CategoryTabs } from "@/components/pos/category-tabs";
 import { CartPanel } from "@/components/pos/cart-panel";
 import { PaymentModal } from "@/components/pos/payment-modal";
 import { CartLine, CustomerLite, HoldOrder, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { useSession } from "next-auth/react";
+import { useToast } from "@/components/toast-provider";
 
 type CompletedSale = {
   txNumber?: string;
@@ -45,7 +47,13 @@ export function PosWorkspace({
   customers: CustomerLite[];
 }) {
   const { data: session } = useSession();
+  const { success } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
+  const [enableProductCategories, setEnableProductCategories] = useState(true);
+  const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(true);
+  const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
+  const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
@@ -64,14 +72,23 @@ export function PosWorkspace({
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
     return products.filter((product) => {
+      const categoryMatch =
+        !enableProductCategories || activeCategory === "All" || product.category === activeCategory;
       const queryMatch =
         !q ||
         product.name.toLowerCase().includes(q) ||
         product.sku.toLowerCase().includes(q) ||
         product.barcode?.toLowerCase().includes(q);
-      return queryMatch;
+      return categoryMatch && queryMatch;
     });
-  }, [products, query]);
+  }, [activeCategory, enableProductCategories, products, query]);
+
+  const categoryOptions = useMemo(() => {
+    return Array.from(new Set(products.map((product) => product.category).filter(Boolean))) as string[];
+  }, [products]);
+  const visibleCategories = useMemo(() => ["All", ...categoryOptions], [categoryOptions]);
+  const showCategoryFilters = enableProductCategories && categoryOptions.length > 0;
+  const compactCategoryFilters = visibleCategories.length <= 4;
 
   const subtotal = cart.reduce((acc, line) => acc + line.qty * line.price, 0);
   const lineNet = cart.reduce((acc, line) => {
@@ -95,6 +112,37 @@ export function PosWorkspace({
   useEffect(() => {
     void loadTransactions();
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadProductSettings() {
+      const response = await fetch("/api/settings");
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!mounted) return;
+      setEnableProductCategories(payload.enableProductCategories !== false);
+      setEnableCompatibleUnits(payload.enableCompatibleUnits !== false);
+      setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
+      setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
+    }
+
+    void loadProductSettings();
+    const handleSettingsUpdated = () => {
+      void loadProductSettings();
+    };
+    window.addEventListener("microbiz:settings-updated", handleSettingsUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener("microbiz:settings-updated", handleSettingsUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enableProductCategories) {
+      setActiveCategory("All");
+    }
+  }, [enableProductCategories]);
 
   useEffect(() => {
     if (view === "pos") {
@@ -191,6 +239,7 @@ export function PosWorkspace({
 
   function printSaleTransaction() {
     window.print();
+    success("Transaction printed successfully");
   }
 
   async function completeSale() {
@@ -237,6 +286,7 @@ export function PosWorkspace({
       setCompletedSale(snapshot);
       setPaymentOpen(false);
       resetOrderState();
+      success("Processed successfully");
       return;
     }
 
@@ -255,6 +305,7 @@ export function PosWorkspace({
     setPaymentOpen(false);
     resetOrderState();
     await loadTransactions();
+    success("Processed successfully");
     const shouldPrint = window.confirm(
       `Sale ${data.number} completed. Do you want to print the sale transaction now?`
     );
@@ -275,6 +326,7 @@ export function PosWorkspace({
       return;
     }
     await loadTransactions();
+    success("Process successful");
   }
 
   return (
@@ -304,10 +356,30 @@ export function PosWorkspace({
         </div>
       </div>
 
+      {view === "pos" && showCategoryFilters ? (
+        <div
+          className={
+            compactCategoryFilters ? "pos-category-filter-bar pos-category-filter-bar-compact" : "pos-category-filter-bar"
+          }
+        >
+          <CategoryTabs
+            categories={visibleCategories}
+            selected={activeCategory}
+            onSelect={setActiveCategory}
+          />
+        </div>
+      ) : null}
+
       {view === "pos" ? (
         <div className="pos-layout">
           <section className="pos-left">
-            <ProductGrid products={filteredProducts} onAdd={addProduct} />
+            <ProductGrid
+              products={filteredProducts}
+              showCompatibleUnits={enableCompatibleUnits}
+              showLowStockAlerts={enableLowStockAlerts}
+              lowStockThreshold={lowStockThreshold}
+              onAdd={addProduct}
+            />
           </section>
           <CartPanel
             cart={cart}

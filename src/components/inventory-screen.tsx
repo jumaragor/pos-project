@@ -1,9 +1,10 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { useToast } from "@/components/toast-provider";
 import {
   normalizeDecimalInput,
   normalizeIntegerInput,
@@ -16,6 +17,7 @@ type ProductRow = {
   id: string;
   name: string;
   sku: string;
+  categoryId?: string | null;
   category: string;
   description: string;
   compatibleUnits: string;
@@ -29,33 +31,102 @@ type ProductRow = {
   isActive: boolean;
   lowStockThreshold: number;
 };
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+type InventoryMetrics = {
+  totalItems: number;
+  lowStockItems: number;
+  availableCategories: number;
+  inventoryValue: number;
+};
+type CategoryOption = {
+  id: string;
+  name: string;
+  code: string;
+  skuPrefix: string;
+  status: "ACTIVE" | "INACTIVE";
+};
 
 type SortKey = "name" | "sku" | "category" | "stockQty" | "sellingPrice";
 type InventoryFilter = "active" | "archived" | "all";
+type ProductBehaviorSettings = {
+  enableProductCategories: boolean;
+  enableCompatibleUnits: boolean;
+  allowProductPhotoUpload: boolean;
+  requireSKU: boolean;
+  autoGenerateSKU: boolean;
+  skuGenerationMode: "MANUAL" | "GLOBAL" | "CATEGORY_BASED";
+  allowNegativeStock: boolean;
+  lowStockThreshold: number;
+  allowManualStockAdjustments: boolean;
+  allowProductDeletion: boolean;
+  enableLowStockAlerts: boolean;
+};
+
+const defaultProductBehaviorSettings: ProductBehaviorSettings = {
+  enableProductCategories: true,
+  enableCompatibleUnits: true,
+  allowProductPhotoUpload: true,
+  requireSKU: true,
+  autoGenerateSKU: false,
+  skuGenerationMode: "GLOBAL",
+  allowNegativeStock: false,
+  lowStockThreshold: 10,
+  allowManualStockAdjustments: true,
+  allowProductDeletion: false,
+  enableLowStockAlerts: true
+};
 
 export function InventoryScreen({
-  initialProducts
+  initialProducts,
+  initialPagination,
+  initialMetrics,
+  initialCategoryOptions
 }: {
   initialProducts: ProductRow[];
+  initialPagination: PaginationState;
+  initialMetrics: InventoryMetrics;
+  initialCategoryOptions: string[];
 }) {
   const { data: session } = useSession();
+  const { success } = useToast();
   const isAdmin = ["OWNER", "MANAGER"].includes(session?.user?.role ?? "");
   const [products, setProducts] = useState(initialProducts);
+  const [pagination, setPagination] = useState(initialPagination);
+  const [metrics, setMetrics] = useState(initialMetrics);
+  const [categoryOptions, setCategoryOptions] = useState(initialCategoryOptions);
+  const [availableCategories, setAvailableCategories] = useState<CategoryOption[]>([]);
+  const [productSettings, setProductSettings] = useState<ProductBehaviorSettings>(
+    defaultProductBehaviorSettings
+  );
   const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>("active");
+  const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [loadingList, setLoadingList] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
   const [activeProduct, setActiveProduct] = useState<ProductRow | null>(null);
   const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoPreview, setCreatePhotoPreview] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraSupported, setCameraSupported] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraCapturedPreview, setCameraCapturedPreview] = useState<string | null>(null);
+  const [cameraCapturedFile, setCameraCapturedFile] = useState<File | null>(null);
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
   const [editPhotoPreview, setEditPhotoPreview] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     sku: "",
+    categoryId: "",
     category: "General",
     description: "",
     compatibleUnits: "",
@@ -70,6 +141,13 @@ export function InventoryScreen({
   });
   const [createQtyInput, setCreateQtyInput] = useState("0");
   const [createPriceInput, setCreatePriceInput] = useState("0.00");
+  const [adjustQtyInput, setAdjustQtyInput] = useState("0");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustSaving, setAdjustSaving] = useState(false);
+  const createPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (!editOpen) return;
@@ -80,91 +158,122 @@ export function InventoryScreen({
     };
   }, [editOpen]);
 
-  const refresh = useCallback(async () => {
-    const response = await fetch(`/api/products?filter=${inventoryFilter}`);
-    const data = await response.json();
-    setProducts(
-      data.map(
-        (item: ProductRow & {
-          stockQty: string;
-          sellingPrice: string;
-          costPrice: string;
-          lowStockThreshold: string;
-          allowNegativeStock?: boolean;
-          isActive?: boolean;
-        }) => ({
-          ...item,
-          description: item.description ?? "",
-          barcode: item.barcode ?? "",
-          photoUrl: item.photoUrl ?? null,
-          stockQty: Number(item.stockQty),
-          sellingPrice: Number(item.sellingPrice),
-          costPrice: Number(item.costPrice),
-          allowNegativeStock: Boolean(item.allowNegativeStock),
-          isActive: Boolean(item.isActive),
-          lowStockThreshold: Number(item.lowStockThreshold)
-        })
-      )
+  useEffect(() => {
+    setCameraSupported(
+      typeof navigator !== "undefined" &&
+        Boolean(navigator.mediaDevices?.getUserMedia)
     );
-  }, [inventoryFilter]);
+  }, []);
 
   useEffect(() => {
-    void refresh();
-    setPage(1);
-  }, [refresh]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const searched = !q
-      ? products
-      : products.filter(
-          (item) =>
-            item.name.toLowerCase().includes(q) ||
-            item.sku.toLowerCase().includes(q) ||
-            item.category.toLowerCase().includes(q) ||
-            item.description.toLowerCase().includes(q) ||
-            (item.barcode ?? "").toLowerCase().includes(q)
-        );
-    const sorted = [...searched].sort((a, b) => {
-      const aValue = a[sortKey];
-      const bValue = b[sortKey];
-      if (typeof aValue === "number" && typeof bValue === "number") {
-        return sortDir === "asc" ? aValue - bValue : bValue - aValue;
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
       }
-      const aText = String(aValue).toLowerCase();
-      const bText = String(bValue).toLowerCase();
-      return sortDir === "asc" ? aText.localeCompare(bText) : bText.localeCompare(aText);
-    });
-    return sorted;
-  }, [products, query, sortKey, sortDir]);
+      if (cameraCapturedPreview?.startsWith("blob:")) {
+        URL.revokeObjectURL(cameraCapturedPreview);
+      }
+    };
+  }, [cameraCapturedPreview]);
 
-  const entries = 10;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / entries));
-  const currentPage = Math.min(page, totalPages);
-  const pageStart = (currentPage - 1) * entries;
-  const pageData = filtered.slice(pageStart, pageStart + entries);
+  useEffect(() => {
+    if (!productSettings.enableProductCategories) {
+      setSelectedCategory("ALL");
+    }
+  }, [productSettings.enableProductCategories]);
 
-  const metrics = useMemo(() => {
-    const totalItems = products.length;
-    const lowStockItems = products.filter(
-      (item) => item.stockQty <= Math.max(0, item.lowStockThreshold)
-    ).length;
-    const availableCategories = new Set(products.map((item) => item.category).filter(Boolean)).size;
-    const inventoryValue = products.reduce(
-      (sum, item) => sum + Math.max(0, item.stockQty) * Math.max(0, item.costPrice),
-      0
-    );
-    return { totalItems, lowStockItems, availableCategories, inventoryValue };
-  }, [products]);
+  const refresh = useCallback(
+    async (nextPage = page, nextQuery = query) => {
+      setLoadingList(true);
+      try {
+        const params = new URLSearchParams({
+          filter: inventoryFilter,
+          page: String(nextPage),
+          pageSize: String(pagination.pageSize),
+          sortKey,
+          sortDir
+        });
+        if (nextQuery.trim()) {
+          params.set("q", nextQuery.trim());
+        }
+        if (productSettings.enableProductCategories && selectedCategory !== "ALL") {
+          params.set("category", selectedCategory);
+        }
+        const response = await fetch(`/api/products?${params.toString()}`);
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          items: ProductRow[];
+          pagination: PaginationState;
+          metrics: InventoryMetrics;
+          categoryOptions: string[];
+        };
+        setProducts(payload.items);
+        setPagination(payload.pagination);
+        setMetrics(payload.metrics);
+        setCategoryOptions(payload.categoryOptions);
+      } finally {
+        setLoadingList(false);
+      }
+    },
+    [inventoryFilter, page, pagination.pageSize, productSettings.enableProductCategories, query, selectedCategory, sortDir, sortKey]
+  );
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      void refresh(page, query);
+    }, query.trim() ? 250 : 0);
+    return () => window.clearTimeout(handle);
+  }, [page, query, inventoryFilter, selectedCategory, sortKey, sortDir, refresh]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadProductSettings() {
+      const [settingsResponse, categoriesResponse] = await Promise.all([
+        fetch("/api/settings"),
+        fetch("/api/categories?activeOnly=true&pageSize=100")
+      ]);
+      if (!settingsResponse.ok) return;
+      const payload = (await settingsResponse.json()) as Partial<ProductBehaviorSettings>;
+      if (!mounted) return;
+      setProductSettings((prev) => ({ ...prev, ...payload }));
+      if (categoriesResponse.ok) {
+        const categoriesPayload = (await categoriesResponse.json()) as { items: CategoryOption[] };
+        if (!mounted) return;
+        setAvailableCategories(categoriesPayload.items);
+      }
+    }
+
+    void loadProductSettings();
+    const handleSettingsUpdated = () => {
+      void loadProductSettings();
+      void refresh(1, query);
+    };
+    window.addEventListener("microbiz:settings-updated", handleSettingsUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener("microbiz:settings-updated", handleSettingsUpdated);
+    };
+  }, [query, refresh]);
 
   function getStockStatus(item: ProductRow) {
     if (item.stockQty <= 0) {
       return { label: "Out of Stock", className: "inventory-status-out" };
     }
-    if (item.stockQty <= Math.max(0, item.lowStockThreshold)) {
+    if (
+      productSettings.enableLowStockAlerts &&
+      item.stockQty <= Math.max(0, productSettings.lowStockThreshold)
+    ) {
       return { label: "Low Stock", className: "inventory-status-low" };
     }
     return { label: "In Stock", className: "inventory-status-in" };
+  }
+
+  function openAdjust(product: ProductRow) {
+    setActiveProduct(product);
+    setAdjustQtyInput("0");
+    setAdjustReason("");
+    setAdjustOpen(true);
   }
 
   function changeSort(next: SortKey) {
@@ -180,7 +289,8 @@ export function InventoryScreen({
     setForm({
       name: "",
       sku: "",
-      category: "General",
+      categoryId: availableCategories[0]?.id ?? "",
+      category: availableCategories[0]?.name ?? "General",
       description: "",
       compatibleUnits: "",
       barcode: "",
@@ -190,7 +300,7 @@ export function InventoryScreen({
       stockQty: 0,
       allowNegativeStock: false,
       isActive: true,
-      lowStockThreshold: 0
+      lowStockThreshold: productSettings.lowStockThreshold
     });
     setCreateQtyInput("0");
     setCreatePriceInput("0.00");
@@ -204,6 +314,7 @@ export function InventoryScreen({
     setForm({
       name: product.name,
       sku: product.sku,
+      categoryId: product.categoryId ?? "",
       category: product.category,
       description: product.description,
       compatibleUnits: product.compatibleUnits ?? "",
@@ -221,8 +332,7 @@ export function InventoryScreen({
     setEditOpen(true);
   }
 
-  function onCreatePhotoSelected(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
+  function setCreatePhotoFromFile(file: File | null) {
     setCreatePhotoFile(file);
     if (createPhotoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(createPhotoPreview);
@@ -234,12 +344,131 @@ export function InventoryScreen({
     setCreatePhotoPreview(URL.createObjectURL(file));
   }
 
+  function onCreatePhotoSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setCreatePhotoFromFile(file);
+  }
+
   function clearCreatePhoto() {
     if (createPhotoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(createPhotoPreview);
     }
     setCreatePhotoFile(null);
     setCreatePhotoPreview(null);
+    if (createPhotoInputRef.current) {
+      createPhotoInputRef.current.value = "";
+    }
+  }
+
+  function triggerCreatePhotoPicker() {
+    createPhotoInputRef.current?.click();
+  }
+
+  async function openCameraModal() {
+    if (!cameraSupported) {
+      setCameraError("Camera is not supported on this browser or device.");
+      return;
+    }
+
+    setCameraOpen(true);
+    setCameraError("");
+    setCameraCapturedFile(null);
+    if (cameraCapturedPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(cameraCapturedPreview);
+    }
+    setCameraCapturedPreview(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+      });
+      cameraStreamRef.current = stream;
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        await cameraVideoRef.current.play();
+      }
+    } catch {
+      setCameraError("Camera access was denied or is unavailable. You can still upload a photo.");
+    }
+  }
+
+  function closeCameraModal() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+    setCameraOpen(false);
+    setCameraError("");
+    setCameraCapturedFile(null);
+    if (cameraCapturedPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(cameraCapturedPreview);
+    }
+    setCameraCapturedPreview(null);
+  }
+
+  async function captureCameraPhoto() {
+    const video = cameraVideoRef.current;
+    const canvas = cameraCanvasRef.current;
+    if (!video || !canvas) return;
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) {
+      setCameraError("Camera is still initializing. Please try again.");
+      return;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Unable to capture photo.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.92)
+    );
+    if (!blob) {
+      setCameraError("Unable to capture photo.");
+      return;
+    }
+
+    if (cameraCapturedPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(cameraCapturedPreview);
+    }
+
+    const file = new File([blob], `camera-${Date.now()}.jpg`, { type: "image/jpeg" });
+    setCameraCapturedFile(file);
+    setCameraCapturedPreview(URL.createObjectURL(blob));
+    setCameraError("");
+  }
+
+  function retakeCameraPhoto() {
+    setCameraCapturedFile(null);
+    if (cameraCapturedPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(cameraCapturedPreview);
+    }
+    setCameraCapturedPreview(null);
+    setCameraError("");
+  }
+
+  function useCapturedPhoto() {
+    if (!cameraCapturedFile) return;
+    setCreatePhotoFromFile(cameraCapturedFile);
+    closeCameraModal();
+  }
+
+  function handleCreatePhotoDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0] ?? null;
+    if (!file) return;
+    setCreatePhotoFromFile(file);
   }
 
   function onEditPhotoSelected(event: ChangeEvent<HTMLInputElement>) {
@@ -264,6 +493,14 @@ export function InventoryScreen({
   }
 
   async function createProduct() {
+    if (!form.name.trim()) {
+      alert("Product Name is required");
+      return;
+    }
+    if (productSettings.requireSKU && !productSettings.autoGenerateSKU && !form.sku.trim()) {
+      alert("SKU is required");
+      return;
+    }
     const response = await fetch("/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -275,7 +512,7 @@ export function InventoryScreen({
       return;
     }
     const created = await response.json();
-    if (createPhotoFile) {
+    if (productSettings.allowProductPhotoUpload && createPhotoFile) {
       try {
         const body = new FormData();
         body.append("file", createPhotoFile);
@@ -299,12 +536,17 @@ export function InventoryScreen({
     setCreateOpen(false);
     clearCreatePhoto();
     await refresh();
+    success("Item added successfully");
   }
 
   async function updateProduct() {
     if (!activeProduct) return;
     if (!form.name.trim()) {
       alert("Product Name is required");
+      return;
+    }
+    if (productSettings.requireSKU && !productSettings.autoGenerateSKU && !form.sku.trim()) {
+      alert("SKU is required");
       return;
     }
     if (!Number.isFinite(form.sellingPrice)) {
@@ -325,7 +567,7 @@ export function InventoryScreen({
       alert(payload.error ?? "Failed to update product");
       return;
     }
-    if (editPhotoFile) {
+    if (productSettings.allowProductPhotoUpload && editPhotoFile) {
       try {
         const body = new FormData();
         body.append("file", editPhotoFile);
@@ -350,6 +592,7 @@ export function InventoryScreen({
     clearEditPhoto();
     setActiveProduct(null);
     await refresh();
+    success("Item updated successfully");
   }
 
   async function deleteProduct(id: string) {
@@ -361,6 +604,7 @@ export function InventoryScreen({
       return;
     }
     await refresh();
+    success("Item deleted successfully");
   }
 
   async function archiveProduct(id: string) {
@@ -372,6 +616,7 @@ export function InventoryScreen({
       return;
     }
     await refresh();
+    success("Processed successfully");
   }
 
   async function restoreProduct(id: string) {
@@ -382,6 +627,44 @@ export function InventoryScreen({
       return;
     }
     await refresh();
+    success("Processed successfully");
+  }
+
+  async function saveAdjustment() {
+    if (!activeProduct) return;
+    const qtyDelta = Number(adjustQtyInput);
+    if (!Number.isFinite(qtyDelta) || qtyDelta === 0) {
+      alert("Enter a non-zero stock adjustment.");
+      return;
+    }
+    if (!adjustReason.trim()) {
+      alert("Adjustment reason is required.");
+      return;
+    }
+
+    setAdjustSaving(true);
+    try {
+      const response = await fetch("/api/inventory/adjust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: activeProduct.id,
+          qtyDelta,
+          reason: adjustReason.trim()
+        })
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        alert(payload.error ?? "Failed to adjust stock");
+        return;
+      }
+      setAdjustOpen(false);
+      setActiveProduct(null);
+      await refresh();
+      success("Processed successfully");
+    } finally {
+      setAdjustSaving(false);
+    }
   }
 
   return (
@@ -422,25 +705,52 @@ export function InventoryScreen({
             <button
               type="button"
               className={inventoryFilter === "active" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => setInventoryFilter("active")}
+              onClick={() => {
+                setInventoryFilter("active");
+                setPage(1);
+              }}
             >
               Active
             </button>
             <button
               type="button"
               className={inventoryFilter === "archived" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => setInventoryFilter("archived")}
+              onClick={() => {
+                setInventoryFilter("archived");
+                setPage(1);
+              }}
             >
               Archived
             </button>
             <button
               type="button"
               className={inventoryFilter === "all" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => setInventoryFilter("all")}
+              onClick={() => {
+                setInventoryFilter("all");
+                setPage(1);
+              }}
             >
               All
             </button>
           </div>
+          {productSettings.enableProductCategories ? (
+            <div className="row inventory-filter-row">
+              <select
+                value={selectedCategory}
+                onChange={(event) => {
+                  setSelectedCategory(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="ALL">All Categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <input
             placeholder="Search product name / SKU / barcode"
             value={query}
@@ -467,11 +777,13 @@ export function InventoryScreen({
                     SKU
                   </button>
                 </th>
-                <th>
-                  <button type="button" className="table-sort-btn" onClick={() => changeSort("category")}>
-                    Category
-                  </button>
-                </th>
+                {productSettings.enableProductCategories ? (
+                  <th>
+                    <button type="button" className="table-sort-btn" onClick={() => changeSort("category")}>
+                      Category
+                    </button>
+                  </th>
+                ) : null}
                 <th>
                   <button type="button" className="table-sort-btn" onClick={() => changeSort("stockQty")}>
                     Stock
@@ -491,7 +803,14 @@ export function InventoryScreen({
               </tr>
             </thead>
             <tbody>
-              {pageData.map((item) => {
+              {loadingList ? (
+                <tr>
+                  <td colSpan={productSettings.enableProductCategories ? 8 : 7} className="muted">
+                    Loading inventory...
+                  </td>
+                </tr>
+              ) : (
+                products.map((item) => {
                 const stockStatus = getStockStatus(item);
                 return (
                 <tr key={item.id}>
@@ -510,7 +829,7 @@ export function InventoryScreen({
                   </td>
                   <td>{item.name}</td>
                   <td>{item.sku}</td>
-                  <td>{item.category}</td>
+                  {productSettings.enableProductCategories ? <td>{item.category}</td> : null}
                   <td>{item.stockQty}</td>
                   <td>PHP {item.sellingPrice.toFixed(2)}</td>
                   <td>
@@ -518,19 +837,24 @@ export function InventoryScreen({
                   </td>
                   <td>
                     <div className="inventory-actions">
-                      <button className="btn-info" onClick={() => openEdit(item)}>
-                        Edit
-                      </button>
-                      {item.isActive ? (
-                        <button className="btn-secondary" onClick={() => archiveProduct(item.id)}>
-                          Archive Item
+                        <button className="btn-info" onClick={() => openEdit(item)}>
+                          Edit
+                        </button>
+                        {productSettings.allowManualStockAdjustments && isAdmin ? (
+                          <button className="btn-secondary" onClick={() => openAdjust(item)}>
+                            Adjust Stock
+                          </button>
+                        ) : null}
+                        {item.isActive ? (
+                          <button className="btn-secondary" onClick={() => archiveProduct(item.id)}>
+                            Archive Item
                         </button>
                       ) : (
                         <button className="btn-success" onClick={() => restoreProduct(item.id)}>
                           Restore
                         </button>
                       )}
-                      {!item.isActive && isAdmin ? (
+                      {!item.isActive && isAdmin && productSettings.allowProductDeletion ? (
                         <button className="btn-danger" onClick={() => deleteProduct(item.id)}>
                           Permanently Delete
                         </button>
@@ -539,10 +863,10 @@ export function InventoryScreen({
                   </td>
                 </tr>
                 );
-              })}
-              {!pageData.length ? (
+              }))}
+              {!loadingList && !products.length ? (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={productSettings.enableProductCategories ? 8 : 7} className="muted">
                     {inventoryFilter === "active"
                       ? "No active inventory items yet."
                       : inventoryFilter === "archived"
@@ -557,23 +881,24 @@ export function InventoryScreen({
 
         <div className="inventory-pagination">
           <div>
-            Showing {pageData.length ? pageStart + 1 : 0} to {pageStart + pageData.length} of {filtered.length}
+            Showing {products.length ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to{" "}
+            {(pagination.page - 1) * pagination.pageSize + products.length} of {pagination.total}
           </div>
           <div className="row">
             <button
               className="btn-secondary"
-              disabled={currentPage <= 1}
+              disabled={pagination.page <= 1 || loadingList}
               onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
             >
               Prev
             </button>
             <span className="badge">
-              Page {currentPage} / {totalPages}
+              Page {pagination.page} / {pagination.totalPages}
             </span>
             <button
               className="btn-secondary"
-              disabled={currentPage >= totalPages}
-              onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={pagination.page >= pagination.totalPages || loadingList}
+              onClick={() => setPage((prev) => Math.min(prev + 1, pagination.totalPages))}
             >
               Next
             </button>
@@ -597,10 +922,24 @@ export function InventoryScreen({
               <div className="form-field">
                 <label className="field-label">SKU</label>
                 <input
-                  placeholder="Enter SKU"
+                  placeholder={
+                    productSettings.autoGenerateSKU
+                      ? productSettings.skuGenerationMode === "CATEGORY_BASED"
+                        ? "Leave blank to use category prefix"
+                        : "Leave blank to auto-generate"
+                      : "Enter SKU"
+                  }
                   value={form.sku}
                   onChange={(event) => setForm({ ...form, sku: event.target.value })}
                 />
+                {productSettings.autoGenerateSKU ? (
+                  <div className="field-help">
+                    SKU will be auto-generated if left blank.
+                    {productSettings.skuGenerationMode === "CATEGORY_BASED"
+                      ? " The selected category prefix will be used."
+                      : ""}
+                  </div>
+                ) : null}
               </div>
               <div className="form-field">
                 <label className="field-label">Description</label>
@@ -610,6 +949,31 @@ export function InventoryScreen({
                   onChange={(event) => setForm({ ...form, description: event.target.value })}
                 />
               </div>
+              {productSettings.enableProductCategories ? (
+                <div className="form-field">
+                  <label className="field-label">Category</label>
+                  <select
+                    value={form.categoryId}
+                    onChange={(event) => {
+                      const nextCategory = availableCategories.find(
+                        (category) => category.id === event.target.value
+                      );
+                      setForm({
+                        ...form,
+                        categoryId: event.target.value,
+                        category: nextCategory?.name ?? "General"
+                      });
+                    }}
+                  >
+                    <option value="">Select category</option>
+                    {availableCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name} ({category.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="row">
                 <div className="form-field">
                   <label className="field-label">Initial Quantity</label>
@@ -658,43 +1022,83 @@ export function InventoryScreen({
                   />
                 </div>
               </div>
-              <div className="form-field">
-                <label className="field-label">Compatible Units</label>
-                <textarea
-                  placeholder=""
-                  value={form.compatibleUnits ?? ""}
-                  onChange={(event) => setForm({ ...form, compatibleUnits: event.target.value })}
-                />
-                <div className="field-help">
-                  For cashier reference only. Does not affect pricing or stock.
-                </div>
-              </div>
-              <div className="form-field">
-                <label className="field-label">Product Photo (Optional)</label>
-                {createPhotoPreview ? (
-                  <Image
-                    src={createPhotoPreview}
-                    alt="New item preview"
-                    width={640}
-                    height={240}
-                    className="inventory-photo-preview"
+              {productSettings.enableCompatibleUnits ? (
+                <div className="form-field">
+                  <label className="field-label">Compatible Units</label>
+                  <textarea
+                    placeholder=""
+                    value={form.compatibleUnits ?? ""}
+                    onChange={(event) => setForm({ ...form, compatibleUnits: event.target.value })}
                   />
-                ) : (
-                  <div className="inventory-photo-empty-lg">No photo selected</div>
-                )}
-                <div className="row">
-                  <input type="file" accept="image/*" onChange={onCreatePhotoSelected} />
+                  <div className="field-help">
+                    For cashier reference only. Does not affect pricing or stock.
+                  </div>
+                </div>
+              ) : null}
+              {productSettings.allowProductPhotoUpload ? (
+                <div className="form-field">
+                  <label className="field-label">Product Photo (Optional)</label>
                   <input
+                    ref={createPhotoInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     onChange={onCreatePhotoSelected}
+                    className="inventory-upload-input"
                   />
+                  {createPhotoPreview ? (
+                    <div className="inventory-upload-preview-block">
+                      <Image
+                        src={createPhotoPreview}
+                        alt="New item preview"
+                        width={640}
+                        height={240}
+                        className="inventory-photo-preview"
+                      />
+                      <div className="inventory-upload-actions">
+                        <SecondaryButton type="button" onClick={triggerCreatePhotoPicker}>
+                          Change
+                        </SecondaryButton>
+                        <SecondaryButton type="button" onClick={clearCreatePhoto}>
+                          Remove
+                        </SecondaryButton>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="inventory-upload-preview-block">
+                      <button
+                        type="button"
+                        className="inventory-upload-box"
+                        onClick={triggerCreatePhotoPicker}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={handleCreatePhotoDrop}
+                      >
+                        <span className="inventory-upload-title">Click to upload or drag image</span>
+                        <span className="inventory-upload-caption">PNG, JPG, WEBP up to 5MB</span>
+                      </button>
+                      <div className="inventory-upload-actions inventory-upload-actions-start">
+                        <PrimaryButton type="button" onClick={triggerCreatePhotoPicker}>
+                          Upload Photo
+                        </PrimaryButton>
+                        <SecondaryButton
+                          type="button"
+                          onClick={openCameraModal}
+                          disabled={!cameraSupported}
+                          title={
+                            cameraSupported
+                              ? "Capture photo from camera"
+                              : "Camera is not supported on this device"
+                          }
+                        >
+                          Take Photo
+                        </SecondaryButton>
+                      </div>
+                      {!cameraSupported ? (
+                        <div className="field-help">Camera capture is not available on this browser or device.</div>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
-                {createPhotoFile ? (
-                  <SecondaryButton onClick={clearCreatePhoto}>Clear Photo</SecondaryButton>
-                ) : null}
-              </div>
+              ) : null}
             </div>
             <div className="row" style={{ marginTop: 12 }}>
               <SecondaryButton
@@ -734,6 +1138,14 @@ export function InventoryScreen({
                   value={form.sku}
                   onChange={(event) => setForm({ ...form, sku: event.target.value })}
                 />
+                {productSettings.autoGenerateSKU ? (
+                  <div className="field-help">
+                    If blank, the existing SKU will be retained or a new one generated.
+                    {productSettings.skuGenerationMode === "CATEGORY_BASED"
+                      ? " Category prefix will be used for newly generated SKUs."
+                      : ""}
+                  </div>
+                ) : null}
               </div>
               <div className="form-field">
                 <label className="field-label">Description</label>
@@ -743,20 +1155,44 @@ export function InventoryScreen({
                   onChange={(event) => setForm({ ...form, description: event.target.value })}
                 />
               </div>
-              <div className="form-field">
-                <label className="field-label">Category</label>
-                <select
-                  value={form.category}
-                  onChange={(event) => setForm({ ...form, category: event.target.value })}
-                >
-                  {Array.from(new Set(products.map((product) => product.category).filter(Boolean))).map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                  <option value="General">General</option>
-                </select>
-              </div>
+              {productSettings.enableProductCategories ? (
+                <div className="form-field">
+                  <label className="field-label">Category</label>
+                  <select
+                    value={form.categoryId}
+                    onChange={(event) => {
+                      const nextCategory = availableCategories.find(
+                        (category) => category.id === event.target.value
+                      );
+                      setForm({
+                        ...form,
+                        categoryId: event.target.value,
+                        category: nextCategory?.name ?? form.category
+                      });
+                    }}
+                  >
+                    <option value="">Select category</option>
+                    {availableCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name} ({category.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              {productSettings.enableCompatibleUnits ? (
+                <div className="form-field">
+                  <label className="field-label">Compatible Units</label>
+                  <textarea
+                    placeholder="Compatible Units"
+                    value={form.compatibleUnits ?? ""}
+                    onChange={(event) => setForm({ ...form, compatibleUnits: event.target.value })}
+                  />
+                  <div className="field-help">
+                    For cashier reference only. Does not affect pricing or stock.
+                  </div>
+                </div>
+              ) : null}
               <div className="row">
                 <div className="form-field">
                   <label className="field-label">Quantity (Current Stock)</label>
@@ -799,22 +1235,24 @@ export function InventoryScreen({
                 />
                 Active
               </label>
-              <div className="form-field">
-                <label className="field-label">Photo Upload / Replace Photo</label>
-                {editPhotoPreview ? (
-                  <Image
-                    src={editPhotoPreview}
-                    alt="Update item preview"
-                    width={640}
-                    height={240}
-                    className="inventory-photo-preview inventory-photo-preview-edit"
-                  />
-                ) : (
-                  <div className="inventory-photo-empty-lg">No photo selected</div>
-                )}
-                <input type="file" accept="image/*" onChange={onEditPhotoSelected} />
-                {editPhotoFile ? <SecondaryButton onClick={clearEditPhoto}>Clear Photo</SecondaryButton> : null}
-              </div>
+              {productSettings.allowProductPhotoUpload ? (
+                <div className="form-field">
+                  <label className="field-label">Photo Upload / Replace Photo</label>
+                  {editPhotoPreview ? (
+                    <Image
+                      src={editPhotoPreview}
+                      alt="Update item preview"
+                      width={640}
+                      height={240}
+                      className="inventory-photo-preview inventory-photo-preview-edit"
+                    />
+                  ) : (
+                    <div className="inventory-photo-empty-lg">No photo selected</div>
+                  )}
+                  <input type="file" accept="image/*" onChange={onEditPhotoSelected} />
+                  {editPhotoFile ? <SecondaryButton onClick={clearEditPhoto}>Clear Photo</SecondaryButton> : null}
+                </div>
+              ) : null}
             </div>
             </div>
             <div className="row inventory-modal-footer">
@@ -828,6 +1266,98 @@ export function InventoryScreen({
                 Cancel
               </SecondaryButton>
               <PrimaryButton onClick={updateProduct}>Save Changes</PrimaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {cameraOpen ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal inventory-camera-modal">
+            <h3 className="section-title">Take Photo</h3>
+            <div className="stack">
+              <div className="inventory-camera-frame">
+                {cameraCapturedPreview ? (
+                  <Image
+                    src={cameraCapturedPreview}
+                    alt="Captured product preview"
+                    width={640}
+                    height={360}
+                    className="inventory-photo-preview inventory-camera-preview"
+                  />
+                ) : (
+                  <video ref={cameraVideoRef} className="inventory-camera-video" playsInline muted />
+                )}
+                <canvas ref={cameraCanvasRef} className="inventory-camera-canvas" />
+              </div>
+              {cameraError ? <div className="login-error">{cameraError}</div> : null}
+              <div className="inventory-upload-actions inventory-camera-actions">
+                {cameraCapturedPreview ? (
+                  <>
+                    <SecondaryButton type="button" onClick={retakeCameraPhoto}>
+                      Retake
+                    </SecondaryButton>
+                    <PrimaryButton type="button" onClick={useCapturedPhoto}>
+                      Use Photo
+                    </PrimaryButton>
+                  </>
+                ) : (
+                  <PrimaryButton type="button" onClick={captureCameraPhoto}>
+                    Capture
+                  </PrimaryButton>
+                )}
+                <SecondaryButton type="button" onClick={closeCameraModal}>
+                  Cancel
+                </SecondaryButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {adjustOpen && activeProduct ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal inventory-adjust-modal">
+            <h3 className="section-title">Adjust Stock</h3>
+            <div className="stack">
+              <div className="muted">Product: {activeProduct.name}</div>
+              <label className="form-field">
+                <span className="field-label">Adjustment Quantity</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Use negative for stock-out, positive for stock-in"
+                  value={adjustQtyInput}
+                  onChange={(event) => setAdjustQtyInput(sanitizeDecimalInput(event.target.value))}
+                />
+              </label>
+              <label className="form-field">
+                <span className="field-label">Reason</span>
+                <textarea
+                  rows={2}
+                  value={adjustReason}
+                  onChange={(event) => setAdjustReason(event.target.value)}
+                  placeholder="Enter adjustment reason"
+                />
+              </label>
+              {!productSettings.allowNegativeStock ? (
+                <div className="field-help">
+                  Negative stock is disabled. Adjustments that reduce stock below zero will be blocked.
+                </div>
+              ) : null}
+            </div>
+            <div className="row" style={{ marginTop: 12 }}>
+              <SecondaryButton
+                onClick={() => {
+                  setAdjustOpen(false);
+                  setActiveProduct(null);
+                }}
+              >
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton onClick={saveAdjustment} disabled={adjustSaving}>
+                {adjustSaving ? "Saving..." : "Save Adjustment"}
+              </PrimaryButton>
             </div>
           </div>
         </div>

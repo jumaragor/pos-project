@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PurchaseStatus, SupplierStatus } from "@prisma/client";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { sanitizeDecimalInput, toNumber } from "@/lib/numeric-input";
 import { isVoidedPurchaseNote } from "@/lib/purchase-utils";
+import { useToast } from "@/components/toast-provider";
 
 type ProductOption = {
   id: string;
@@ -37,6 +38,19 @@ type PurchaseRow = {
   totalCost: number;
   status: PurchaseStatus;
   items: PurchaseItemRow[];
+};
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+type PurchaseStatusFilter = "ALL" | "DRAFT" | "POSTED" | "VOIDED";
+type PurchaseFilters = {
+  supplierId: string;
+  status: PurchaseStatusFilter;
+  dateFrom: string;
+  dateTo: string;
 };
 
 type SupplierOption = {
@@ -136,83 +150,141 @@ function makeFormFromPurchase(purchase: PurchaseRow): PurchaseForm {
 
 export function PurchasesScreen({
   initialPurchases,
-  products,
-  suppliers
+  initialPagination
 }: {
   initialPurchases: PurchaseRow[];
-  products: ProductOption[];
-  suppliers: SupplierOption[];
+  initialPagination: PaginationState;
 }) {
+  const { success } = useToast();
   const [purchases, setPurchases] = useState(initialPurchases);
+  const [pagination, setPagination] = useState(initialPagination);
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<PurchaseFilters>({
+    supplierId: "",
+    status: "ALL",
+    dateFrom: "",
+    dateTo: ""
+  });
+  const [loadingList, setLoadingList] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>("create");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activePurchase, setActivePurchase] = useState<PurchaseRow | null>(null);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [form, setForm] = useState<PurchaseForm>({
     purchaseDate: todayDateInput(),
-    supplierId: suppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE)?.id ?? "",
+    supplierId: "",
     referenceNumber: "",
     notes: "",
     status: PurchaseStatus.POSTED,
-    items: [emptyItem(products)]
+    items: []
   });
 
-  async function refresh() {
-    const response = await fetch("/api/purchases");
-    const payload = await response.json();
-    const normalized = payload.map(
-      (purchase: {
-        id: string;
-        purchaseNumber: string;
-        purchaseDate: string;
-        supplierId: string | null;
-        supplierName: string | null;
-        referenceNumber: string | null;
-        notes: string | null;
-        totalItems: string;
-        totalCost: string;
-        status: PurchaseStatus;
-        items: {
-          id: string;
-          productId: string;
-          productName: string;
-          quantity: string;
-          unitCost: string;
-          amount: string;
-          taxRate: string;
-          taxAmount: string;
-          lineTotal: string;
-        }[];
-      }) => ({
-        ...purchase,
-        totalItems: Number(purchase.totalItems),
-        totalCost: Number(purchase.totalCost),
-        items: purchase.items.map((item) => ({
-          ...item,
-          quantity: asSafeNumber(item.quantity),
-          unitCost: asSafeNumber(item.unitCost),
-          amount: asSafeNumber(item.amount),
-          taxRate: asSafeNumber(item.taxRate),
-          taxAmount: asSafeNumber(item.taxAmount),
-          lineTotal: asSafeNumber(item.lineTotal)
-        }))
-      })
-    );
-    setPurchases(normalized);
+  const loadPurchases = useCallback(async (page = pagination.page, search = query) => {
+    setLoadingList(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pagination.pageSize)
+      });
+      if (search.trim()) {
+        params.set("q", search.trim());
+      }
+      if (filters.supplierId) {
+        params.set("supplierId", filters.supplierId);
+      }
+      if (filters.status !== "ALL") {
+        params.set("status", filters.status);
+      }
+      if (filters.dateFrom) {
+        params.set("dateFrom", filters.dateFrom);
+      }
+      if (filters.dateTo) {
+        params.set("dateTo", filters.dateTo);
+      }
+      const response = await fetch(`/api/purchases?${params.toString()}`);
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        items: PurchaseRow[];
+        pagination: PaginationState;
+      };
+      setPurchases(payload.items);
+      setPagination(payload.pagination);
+    } finally {
+      setLoadingList(false);
+    }
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.supplierId, pagination.page, pagination.pageSize, query]);
+
+  const loadFormOptions = useCallback(async () => {
+    if (products.length && suppliers.length) {
+      return { products, suppliers };
+    }
+    setLoadingOptions(true);
+    try {
+      let nextProducts = products;
+      let nextSuppliers = suppliers;
+      const [productsResponse, suppliersResponse] = await Promise.all([
+        fetch("/api/products?filter=active&pageSize=200"),
+        fetch("/api/suppliers?activeOnly=true&pageSize=200")
+      ]);
+      if (productsResponse.ok) {
+        const payload = (await productsResponse.json()) as { items: ProductOption[] };
+        nextProducts = payload.items;
+        setProducts(payload.items);
+      }
+      if (suppliersResponse.ok) {
+        const payload = (await suppliersResponse.json()) as { items: SupplierOption[] };
+        nextSuppliers = payload.items;
+        setSuppliers(payload.items);
+      }
+      return { products: nextProducts, suppliers: nextSuppliers };
+    } finally {
+      setLoadingOptions(false);
+    }
+  }, [products, suppliers]);
+
+  async function loadPurchaseDetail(id: string) {
+    const response = await fetch(`/api/purchases/${id}`);
+    if (!response.ok) {
+      const payload = await response.json();
+      throw new Error(payload.error ?? "Failed to load purchase");
+    }
+    const purchase = (await response.json()) as PurchaseRow;
+    return {
+      ...purchase,
+      totalItems: asSafeNumber(purchase.totalItems),
+      totalCost: asSafeNumber(purchase.totalCost),
+      items: purchase.items.map((item) => ({
+        ...item,
+        quantity: asSafeNumber(item.quantity),
+        unitCost: asSafeNumber(item.unitCost),
+        amount: asSafeNumber(item.amount),
+        taxRate: asSafeNumber(item.taxRate),
+        taxAmount: asSafeNumber(item.taxAmount),
+        lineTotal: asSafeNumber(item.lineTotal)
+      }))
+    };
   }
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return purchases;
-    return purchases.filter((purchase) => {
-      return (
-        purchase.purchaseNumber.toLowerCase().includes(q) ||
-        (purchase.supplierName ?? "").toLowerCase().includes(q) ||
-        (purchase.referenceNumber ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [purchases, query]);
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      void loadPurchases(1, query);
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.supplierId, loadPurchases, query]);
+
+  useEffect(() => {
+    async function loadSupplierFilters() {
+      const response = await fetch("/api/suppliers?activeOnly=true&pageSize=200");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { items: SupplierOption[] };
+      setSuppliers(payload.items);
+    }
+    void loadSupplierFilters();
+  }, []);
 
   const summary = useMemo(() => {
     const totalItems = form.items.length;
@@ -231,32 +303,53 @@ export function PurchasesScreen({
     return { totalItems, subtotal, totalTax, grandTotal };
   }, [form.items]);
 
-  function openCreate() {
+  async function openCreate() {
+    const options = await loadFormOptions();
+    const nextProducts = options?.products ?? products;
+    const nextSuppliers = options?.suppliers ?? suppliers;
     setFormMode("create");
     setActivePurchase(null);
     setForm({
       purchaseDate: todayDateInput(),
-      supplierId: suppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE)?.id ?? "",
+      supplierId: nextSuppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE)?.id ?? "",
       referenceNumber: "",
       notes: "",
       status: PurchaseStatus.POSTED,
-      items: [emptyItem(products)]
+      items: nextProducts.length ? [emptyItem(nextProducts)] : []
     });
     setOpen(true);
   }
 
-  function openEdit(purchase: PurchaseRow) {
-    setFormMode("edit");
-    setActivePurchase(purchase);
-    setForm(makeFormFromPurchase(purchase));
-    setOpen(true);
+  async function openEdit(purchase: PurchaseRow) {
+    setLoadingDetail(true);
+    try {
+      await loadFormOptions();
+      const detail = await loadPurchaseDetail(purchase.id);
+      setFormMode("edit");
+      setActivePurchase(detail);
+      setForm(makeFormFromPurchase(detail));
+      setOpen(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to load purchase");
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
-  function openView(purchase: PurchaseRow) {
-    setFormMode("view");
-    setActivePurchase(purchase);
-    setForm(makeFormFromPurchase(purchase));
-    setOpen(true);
+  async function openView(purchase: PurchaseRow) {
+    setLoadingDetail(true);
+    try {
+      await loadFormOptions();
+      const detail = await loadPurchaseDetail(purchase.id);
+      setFormMode("view");
+      setActivePurchase(detail);
+      setForm(makeFormFromPurchase(detail));
+      setOpen(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to load purchase");
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   function updateItem(
@@ -353,7 +446,8 @@ export function PurchasesScreen({
         return;
       }
       setOpen(false);
-      await refresh();
+      await loadPurchases(formMode === "create" ? 1 : pagination.page, query);
+      success(formMode === "edit" ? "Changes saved successfully" : "Purchase added successfully");
     } finally {
       setSaving(false);
     }
@@ -368,7 +462,8 @@ export function PurchasesScreen({
       alert(result.error ?? "Failed to delete purchase");
       return;
     }
-    await refresh();
+    await loadPurchases(pagination.page, query);
+    success("Deleted successfully");
   }
 
   async function voidPurchase(purchase: PurchaseRow) {
@@ -380,7 +475,8 @@ export function PurchasesScreen({
       alert(result.error ?? "Failed to void purchase");
       return;
     }
-    await refresh();
+    await loadPurchases(pagination.page, query);
+    success("Process successful");
   }
 
   const readOnly = formMode === "view";
@@ -401,8 +497,8 @@ export function PurchasesScreen({
       <div className="card">
         <div className="inventory-table-head">
           <h2 className="section-title">Purchases</h2>
-          <PrimaryButton className="purchases-new-btn" onClick={openCreate}>
-            + New Purchase
+          <PrimaryButton className="purchases-new-btn" onClick={openCreate} disabled={loadingDetail || loadingOptions}>
+            {loadingOptions ? "Loading..." : "+ New Purchase"}
           </PrimaryButton>
         </div>
 
@@ -414,6 +510,73 @@ export function PurchasesScreen({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+        </div>
+
+        <div className="grid grid-4 purchases-filter-grid">
+          <label className="form-field">
+            <span className="field-label">Supplier</span>
+            <select
+              value={filters.supplierId}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, supplierId: event.target.value }))
+              }
+            >
+              <option value="">All suppliers</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.supplierName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span className="field-label">Status</span>
+            <select
+              value={filters.status}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  status: event.target.value as PurchaseStatusFilter
+                }))
+              }
+            >
+              <option value="ALL">All statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="POSTED">Posted</option>
+              <option value="VOIDED">Voided</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span className="field-label">Date From</span>
+            <input
+              type="date"
+              value={filters.dateFrom}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span className="field-label">Date To</span>
+            <input
+              type="date"
+              value={filters.dateTo}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, dateTo: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+        <div className="row purchases-filter-actions">
+          <SecondaryButton
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setFilters({ supplierId: "", status: "ALL", dateFrom: "", dateTo: "" });
+            }}
+          >
+            Clear Filters
+          </SecondaryButton>
         </div>
 
         <div className="table-wrap">
@@ -430,7 +593,14 @@ export function PurchasesScreen({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((purchase) => {
+              {loadingList ? (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    Loading purchases...
+                  </td>
+                </tr>
+              ) : (
+                purchases.map((purchase) => {
                 const isVoided = isVoidedPurchaseNote(purchase.notes);
                 return (
                   <tr key={purchase.id}>
@@ -446,11 +616,11 @@ export function PurchasesScreen({
                     </td>
                     <td>
                       <div className="inventory-actions">
-                        <button className="btn-info" onClick={() => openView(purchase)}>
+                        <button className="btn-info" onClick={() => void openView(purchase)} disabled={loadingDetail}>
                           View
                         </button>
                         {!isVoided && purchase.status === PurchaseStatus.DRAFT ? (
-                          <button className="btn-secondary" onClick={() => openEdit(purchase)}>
+                          <button className="btn-secondary" onClick={() => void openEdit(purchase)} disabled={loadingDetail}>
                             Edit
                           </button>
                         ) : null}
@@ -468,8 +638,8 @@ export function PurchasesScreen({
                     </td>
                   </tr>
                 );
-              })}
-              {!filtered.length ? (
+              }))}
+              {!loadingList && !purchases.length ? (
                 <tr>
                   <td colSpan={7} className="muted">
                     No purchases yet.
@@ -478,6 +648,32 @@ export function PurchasesScreen({
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="inventory-pagination">
+          <div>
+            Showing {purchases.length ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to{" "}
+            {(pagination.page - 1) * pagination.pageSize + purchases.length} of {pagination.total}
+          </div>
+          <div className="row">
+            <button
+              className="btn-secondary"
+              disabled={pagination.page <= 1 || loadingList}
+              onClick={() => void loadPurchases(pagination.page - 1, query)}
+            >
+              Prev
+            </button>
+            <span className="badge">
+              Page {pagination.page} / {pagination.totalPages}
+            </span>
+            <button
+              className="btn-secondary"
+              disabled={pagination.page >= pagination.totalPages || loadingList}
+              onClick={() => void loadPurchases(pagination.page + 1, query)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -489,6 +685,7 @@ export function PurchasesScreen({
             </h3>
 
             <div className="stack">
+              {loadingOptions ? <div className="muted">Loading purchase form options...</div> : null}
               <div className="grid grid-2">
                 <div className="form-field">
                   <label className="field-label">Purchase Date</label>

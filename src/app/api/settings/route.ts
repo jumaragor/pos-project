@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { forbidden, ok, unauthorized } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
+import { invalidateInventorySettingsCache } from "@/lib/inventory-settings";
+import { invalidateProductSettingsCache } from "@/lib/product-settings";
 
 const defaultSettings: Record<string, string> = {
   allowNegativeStock: "false",
@@ -33,6 +35,7 @@ const defaultSettings: Record<string, string> = {
   allowProductPhotoUpload: "true",
   requireSKU: "true",
   autoGenerateSKU: "false",
+  skuGenerationMode: "GLOBAL",
   currency: "PHP",
   dateFormat: "MM/DD/YYYY",
   numberFormat: "1,000.00",
@@ -81,6 +84,8 @@ export async function PUT(request: NextRequest) {
       })
     )
   );
+  invalidateInventorySettingsCache();
+  invalidateProductSettingsCache();
   const refreshed = await prisma.appSetting.findMany({
     where: { key: { in: Object.keys(defaultSettings) } }
   });

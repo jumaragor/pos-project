@@ -25,6 +25,12 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error && error.message === "FORBIDDEN") {
       return forbidden();
     }
+    if (
+      error instanceof Error &&
+      (error.message === "Manual stock adjustments are disabled" || error.message === "Insufficient stock")
+    ) {
+      return badRequest(error.message);
+    }
     return serverError(error instanceof Error ? error.message : "Failed to adjust stock");
   }
 }

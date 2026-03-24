@@ -149,6 +149,16 @@ export function LogoutIcon(props: IconProps) {
   );
 }
 
+export function MenuIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </BaseIcon>
+  );
+}
+
 export const sectionIcons = {
   dashboard: DashboardIcon,
   pos: PosIcon,

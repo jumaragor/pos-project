@@ -1,26 +1,28 @@
 import { PurchasesScreen } from "@/components/purchases-screen";
 import { prisma } from "@/lib/prisma";
+import { buildPagination, DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
 export default async function PurchasesPage() {
-  const [purchases, products, suppliers] = await Promise.all([
+  const [purchases, purchaseTotal] = await Promise.all([
     prisma.purchase.findMany({
-      include: {
-        items: {
-          orderBy: { id: "asc" }
-        }
+      select: {
+        id: true,
+        purchaseNumber: true,
+        purchaseDate: true,
+        supplierId: true,
+        supplierName: true,
+        referenceNumber: true,
+        notes: true,
+        totalItems: true,
+        totalCost: true,
+        status: true
       },
-      orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }]
+      orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }],
+      take: DEFAULT_PAGE_SIZE
     }),
-    prisma.product.findMany({
-      select: { id: true, name: true, sku: true, unit: true },
-      orderBy: { name: "asc" }
-    }),
-    prisma.supplier.findMany({
-      select: { id: true, supplierCode: true, supplierName: true, status: true },
-      orderBy: { supplierName: "asc" }
-    })
+    prisma.purchase.count()
   ]);
 
   return (
@@ -37,20 +39,9 @@ export default async function PurchasesPage() {
           totalItems: Number(purchase.totalItems),
           totalCost: Number(purchase.totalCost),
           status: purchase.status,
-          items: purchase.items.map((item) => ({
-            id: item.id,
-            productId: item.productId,
-            productName: item.productName,
-            quantity: Number(item.quantity),
-            unitCost: Number(item.unitCost),
-            amount: Number(item.amount),
-            taxRate: Number(item.taxRate),
-            taxAmount: Number(item.taxAmount),
-            lineTotal: Number(item.lineTotal)
-          }))
+          items: []
         }))}
-        products={products}
-        suppliers={suppliers}
+        initialPagination={buildPagination(1, DEFAULT_PAGE_SIZE, purchaseTotal)}
       />
     </div>
   );

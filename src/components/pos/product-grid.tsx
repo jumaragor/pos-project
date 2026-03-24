@@ -3,6 +3,9 @@ import { ProductLite } from "@/components/pos/types";
 
 type ProductGridProps = {
   products: ProductLite[];
+  showCompatibleUnits?: boolean;
+  showLowStockAlerts?: boolean;
+  lowStockThreshold?: number;
   onAdd: (product: ProductLite) => void;
 };
 
@@ -25,13 +28,17 @@ function ProductImage({ product }: { product: ProductLite }) {
   return <div className="pos-product-image pos-product-image-placeholder">IMG</div>;
 }
 
-export function ProductGrid({ products, onAdd }: ProductGridProps) {
+export function ProductGrid({
+  products,
+  showCompatibleUnits = true,
+  showLowStockAlerts = true,
+  lowStockThreshold = 0,
+  onAdd
+}: ProductGridProps) {
   return (
     <div className="pos-product-grid">
       {products.map((product) => {
-        const lowStock =
-          typeof product.lowStockThreshold === "number" &&
-          product.stockQty <= product.lowStockThreshold;
+        const lowStock = showLowStockAlerts && product.stockQty <= lowStockThreshold;
         return (
           <button key={product.id} type="button" className="pos-product-card" onClick={() => onAdd(product)}>
             <ProductImage product={product} />
@@ -41,6 +48,9 @@ export function ProductGrid({ products, onAdd }: ProductGridProps) {
               {lowStock ? <span className="pos-stock-badge">Low Stock</span> : null}
             </div>
             <div className="pos-product-sku">{product.sku}</div>
+            {showCompatibleUnits && product.compatibleUnits ? (
+              <div className="pos-product-guide">{product.compatibleUnits}</div>
+            ) : null}
           </button>
         );
       })}

@@ -1,30 +1,113 @@
+import { Prisma } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { badRequest, created, forbidden, ok, serverError, unauthorized } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
 import { can } from "@/lib/rbac";
+import { generateProductSku, getProductSettings } from "@/lib/product-settings";
+import { getInventorySettings } from "@/lib/inventory-settings";
+import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim();
   const filter = request.nextUrl.searchParams.get("filter") ?? "active";
+  const category = request.nextUrl.searchParams.get("category")?.trim();
+  const pageSize = parsePositiveInt(request.nextUrl.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
+  const requestedPage = parsePositiveInt(request.nextUrl.searchParams.get("page"), 1, 10_000);
+  const sortKey = request.nextUrl.searchParams.get("sortKey") ?? "name";
+  const sortDir = request.nextUrl.searchParams.get("sortDir") === "desc" ? "desc" : "asc";
   const activeWhere =
     filter === "archived" ? { isActive: false } : filter === "all" ? {} : { isActive: true };
-  const products = await prisma.product.findMany({
-    where: {
-      ...activeWhere,
-      ...(query
-        ? {
-            OR: [
-              { name: { contains: query, mode: "insensitive" } },
-              { sku: { contains: query, mode: "insensitive" } },
-              { barcode: { contains: query, mode: "insensitive" } }
-            ]
-          }
-        : {})
-    },
-    orderBy: { name: "asc" }
+  const searchableWhere: Prisma.ProductWhereInput = {
+    ...activeWhere,
+    ...(category && category !== "ALL" ? { category } : {}),
+    ...(query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { sku: { contains: query, mode: "insensitive" } },
+            { barcode: { contains: query, mode: "insensitive" } }
+          ]
+        }
+      : {})
+  };
+  const orderBy: Prisma.ProductOrderByWithRelationInput =
+    sortKey === "sku"
+      ? { sku: sortDir }
+      : sortKey === "category"
+        ? { category: sortDir }
+        : sortKey === "stockQty"
+          ? { stockQty: sortDir }
+          : sortKey === "sellingPrice"
+            ? { sellingPrice: sortDir }
+            : { name: sortDir };
+
+  const [inventorySettings, total, products, statsRows, categoryRows] = await Promise.all([
+    getInventorySettings(),
+    prisma.product.count({ where: searchableWhere }),
+    prisma.product.findMany({
+      where: searchableWhere,
+      orderBy,
+      skip: (requestedPage - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        categoryId: true,
+        category: true,
+        description: true,
+        compatibleUnits: true,
+        barcode: true,
+        photoUrl: true,
+        unit: true,
+        sellingPrice: true,
+        costPrice: true,
+        stockQty: true,
+        allowNegativeStock: true,
+        isActive: true,
+        lowStockThreshold: true
+      }
+    }),
+    prisma.product.findMany({
+      where: activeWhere,
+      select: { category: true, stockQty: true, costPrice: true }
+    }),
+    prisma.product.findMany({
+      where: activeWhere,
+      select: { category: true },
+      distinct: ["category"]
+    })
+  ]);
+  const pagination = buildPagination(requestedPage, pageSize, total);
+  const metrics = {
+    totalItems: statsRows.length,
+    lowStockItems: inventorySettings.enableLowStockAlerts
+      ? statsRows.filter((item) => Number(item.stockQty) <= Math.max(0, inventorySettings.lowStockThreshold)).length
+      : 0,
+    availableCategories: new Set(statsRows.map((item) => item.category).filter(Boolean)).size,
+    inventoryValue: statsRows.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.stockQty)) * Math.max(0, Number(item.costPrice)),
+      0
+    )
+  };
+
+  return ok({
+    items: products.map((product) => ({
+      ...product,
+      description: product.description ?? "",
+      compatibleUnits: product.compatibleUnits ?? "",
+      barcode: product.barcode ?? "",
+      photoUrl: product.photoUrl ?? null,
+      sellingPrice: Number(product.sellingPrice),
+      costPrice: Number(product.costPrice),
+      stockQty: Number(product.stockQty),
+      lowStockThreshold: Number(product.lowStockThreshold)
+    })),
+    pagination,
+    metrics,
+    categoryOptions: categoryRows.map((item) => item.category).filter(Boolean).sort()
   });
-  return ok(products);
 }
 
 export async function POST(request: NextRequest) {
@@ -34,21 +117,45 @@ export async function POST(request: NextRequest) {
       return unauthorized();
     }
     const body = await request.json();
-    if (!body.name || !body.sku || !body.unit) {
-      return badRequest("name, sku, and unit are required");
+    const settings = await getProductSettings();
+    if (!body.name || !body.unit) {
+      return badRequest("name and unit are required");
     }
     if ((body.costPrice || body.sellingPrice) && !can(actor.role, "EDIT_PRICING")) {
       return forbidden();
     }
+    const categoryId = typeof body.categoryId === "string" && body.categoryId.trim() ? body.categoryId : null;
+    const category = categoryId
+      ? await prisma.category.findUnique({
+          where: { id: categoryId },
+          select: { id: true, name: true, status: true }
+        })
+      : null;
+    if (categoryId && !category) {
+      return badRequest("Selected category does not exist");
+    }
+    if (category && category.status !== "ACTIVE") {
+      return badRequest("Inactive categories cannot be assigned to new products");
+    }
+    const trimmedSku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
+    if (!trimmedSku && settings.requireSKU && !settings.autoGenerateSKU) {
+      return badRequest("SKU is required");
+    }
+    const sku =
+      trimmedSku || (settings.autoGenerateSKU || !settings.requireSKU ? await generateProductSku(categoryId) : "");
+    if (!sku) {
+      return badRequest("SKU is required");
+    }
     const product = await prisma.product.create({
       data: {
         name: body.name,
-        sku: body.sku,
+        sku,
         description: body.description,
-        compatibleUnits: body.compatibleUnits,
+        compatibleUnits: settings.enableCompatibleUnits ? body.compatibleUnits : null,
         barcode: body.barcode,
         photoUrl: body.photoUrl,
-        category: body.category ?? "General",
+        categoryId: settings.enableProductCategories ? categoryId : null,
+        category: settings.enableProductCategories ? category?.name ?? "General" : "General",
         unit: body.unit,
         costPrice: Number(body.costPrice ?? 0),
         sellingPrice: Number(body.sellingPrice ?? 0),

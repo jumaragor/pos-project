@@ -2,6 +2,8 @@ import { PurchaseStatus, StockMovementType } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { getAuthUser } from "@/lib/api-auth";
 import { badRequest, created, ok, serverError, unauthorized } from "@/lib/http";
+import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
+import { PURCHASE_VOID_MARKER } from "@/lib/purchase-utils";
 import { prisma } from "@/lib/prisma";
 
 type PurchaseItemInput = {
@@ -74,24 +76,69 @@ async function generatePurchaseNumber() {
 export async function GET(request: NextRequest) {
   try {
     const query = request.nextUrl.searchParams.get("q")?.trim();
-    const purchases = await prisma.purchase.findMany({
-      where: query
+    const supplierId = request.nextUrl.searchParams.get("supplierId")?.trim();
+    const status = request.nextUrl.searchParams.get("status")?.trim();
+    const dateFrom = request.nextUrl.searchParams.get("dateFrom")?.trim();
+    const dateTo = request.nextUrl.searchParams.get("dateTo")?.trim();
+    const pageSize = parsePositiveInt(request.nextUrl.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
+    const requestedPage = parsePositiveInt(request.nextUrl.searchParams.get("page"), 1, 10_000);
+    const purchaseDateWhere =
+      dateFrom || dateTo
+        ? {
+            ...(dateFrom ? { gte: new Date(`${dateFrom}T00:00:00`) } : {}),
+            ...(dateTo ? { lte: new Date(`${dateTo}T23:59:59.999`) } : {})
+          }
+        : undefined;
+    const where = {
+      ...(query
         ? {
             OR: [
-              { purchaseNumber: { contains: query, mode: "insensitive" } },
-              { supplierName: { contains: query, mode: "insensitive" } },
-              { referenceNumber: { contains: query, mode: "insensitive" } }
+              { purchaseNumber: { contains: query, mode: "insensitive" as const } },
+              { supplierName: { contains: query, mode: "insensitive" as const } },
+              { referenceNumber: { contains: query, mode: "insensitive" as const } }
             ]
           }
-        : undefined,
-      include: {
-        items: {
-          orderBy: { id: "asc" }
-        }
-      },
-      orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }]
+        : {}),
+      ...(supplierId ? { supplierId } : {}),
+      ...(purchaseDateWhere ? { purchaseDate: purchaseDateWhere } : {}),
+      ...(status === "VOIDED"
+        ? { notes: { contains: PURCHASE_VOID_MARKER } }
+        : status === "DRAFT"
+          ? { status: PurchaseStatus.DRAFT, NOT: { notes: { contains: PURCHASE_VOID_MARKER } } }
+          : status === "POSTED"
+            ? { status: PurchaseStatus.POSTED, NOT: { notes: { contains: PURCHASE_VOID_MARKER } } }
+            : {})
+    };
+    const [total, purchases] = await Promise.all([
+      prisma.purchase.count({ where }),
+      prisma.purchase.findMany({
+        where,
+        select: {
+          id: true,
+          purchaseNumber: true,
+          purchaseDate: true,
+          supplierId: true,
+          supplierName: true,
+          referenceNumber: true,
+          notes: true,
+          totalItems: true,
+          totalCost: true,
+          status: true
+        },
+        orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }],
+        skip: (requestedPage - 1) * pageSize,
+        take: pageSize
+      })
+    ]);
+    return ok({
+      items: purchases.map((purchase) => ({
+        ...purchase,
+        purchaseDate: purchase.purchaseDate.toISOString(),
+        totalItems: Number(purchase.totalItems),
+        totalCost: Number(purchase.totalCost)
+      })),
+      pagination: buildPagination(requestedPage, pageSize, total)
     });
-    return ok(purchases);
   } catch (error) {
     return serverError(error instanceof Error ? error.message : "Failed to fetch purchases");
   }

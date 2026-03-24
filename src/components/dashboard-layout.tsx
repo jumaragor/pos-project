@@ -2,14 +2,16 @@ import { Header } from "@/components/header";
 
 export function DashboardLayout({
   children,
-  collapsed
+  collapsed,
+  onMenuToggle
 }: {
   children: React.ReactNode;
   collapsed: boolean;
+  onMenuToggle?: () => void;
 }) {
   return (
     <div className={collapsed ? "content-shell collapsed" : "content-shell"}>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
       <main className="main">{children}</main>
     </div>
   );

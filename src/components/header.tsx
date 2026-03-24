@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { LogoutIcon } from "@/components/ui/app-icons";
+import { LogoutIcon, MenuIcon } from "@/components/ui/app-icons";
 import { sectionIcons } from "@/components/ui/app-icons";
 
 const sections: Record<string, { label: string; icon: keyof typeof sectionIcons }> = {
@@ -24,7 +24,7 @@ function pageMeta(pathname: string) {
   return sections[segment] ?? { label: "MicroBiz", icon: "login" as const };
 }
 
-export function Header() {
+export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const pathname = usePathname();
   const { data } = useSession();
   const meta = pageMeta(pathname);
@@ -34,12 +34,23 @@ export function Header() {
 
   return (
     <header className="header">
-      <h1 className="header-title">
-        <span className="header-title-wrap">
+      <div className="header-left">
+        <button
+          type="button"
+          className="header-menu-btn"
+          aria-label="Open navigation"
+          title="Open navigation"
+          onClick={onMenuToggle}
+        >
+          <MenuIcon className="header-menu-icon" />
+        </button>
+        <h1 className="header-title">
+          <span className="header-title-wrap">
           <Icon className="header-title-icon" />
           <span>{meta.label}</span>
-        </span>
-      </h1>
+          </span>
+        </h1>
+      </div>
       <div className="header-actions">
         <div className="header-user">
           <span className="header-user-name">{displayName}</span>

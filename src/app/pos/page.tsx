@@ -16,6 +16,7 @@ export default async function POSPage() {
           name: product.name,
           sku: product.sku,
           category: product.category,
+          compatibleUnits: product.compatibleUnits,
           barcode: product.barcode,
           photoUrl: product.photoUrl,
           sellingPrice: Number(product.sellingPrice),

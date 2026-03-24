@@ -60,6 +60,61 @@ function parsePurchaseDate(value: unknown) {
   return date;
 }
 
+export async function GET(_request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const purchase = await prisma.purchase.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        purchaseNumber: true,
+        purchaseDate: true,
+        supplierId: true,
+        supplierName: true,
+        referenceNumber: true,
+        notes: true,
+        totalItems: true,
+        totalCost: true,
+        status: true,
+        items: {
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            productId: true,
+            productName: true,
+            quantity: true,
+            unitCost: true,
+            amount: true,
+            taxRate: true,
+            taxAmount: true,
+            lineTotal: true
+          }
+        }
+      }
+    });
+    if (!purchase) {
+      return badRequest("Purchase not found");
+    }
+    return ok({
+      ...purchase,
+      purchaseDate: purchase.purchaseDate.toISOString(),
+      totalItems: Number(purchase.totalItems),
+      totalCost: Number(purchase.totalCost),
+      items: purchase.items.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity),
+        unitCost: Number(item.unitCost),
+        amount: Number(item.amount),
+        taxRate: Number(item.taxRate),
+        taxAmount: Number(item.taxAmount),
+        lineTotal: Number(item.lineTotal)
+      }))
+    });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : "Failed to fetch purchase");
+  }
+}
+
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const actor = await getAuthUser();

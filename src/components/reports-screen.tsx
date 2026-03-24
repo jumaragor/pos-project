@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { useToast } from "@/components/toast-provider";
 
 type ReportTab = "overview" | "sales" | "product" | "inventory" | "purchase" | "customer";
 
@@ -90,6 +91,7 @@ function formatDateOnly(value: string) {
 }
 
 export function ReportsScreen() {
+  const { success } = useToast();
   const now = useMemo(() => new Date(), []);
   const monthStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
 
@@ -163,6 +165,12 @@ export function ReportsScreen() {
     link.download = `sales-report-${salesFrom}-to-${salesTo}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+    success("Processed successfully");
+  }
+
+  function printReport() {
+    window.print();
+    success("Transaction printed successfully");
   }
 
   const trendMax = Math.max(...(overview?.salesTrend.map((point) => point.total) ?? [1]), 1);
@@ -326,7 +334,7 @@ export function ReportsScreen() {
             <h2 className="section-title">Sales Report</h2>
             <div className="row">
               <SecondaryButton onClick={exportSalesCsv}>Export CSV</SecondaryButton>
-              <PrimaryButton className="reports-action-btn" onClick={() => window.print()}>
+              <PrimaryButton className="reports-action-btn" onClick={printReport}>
                 Print Report
               </PrimaryButton>
             </div>

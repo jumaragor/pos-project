@@ -2,29 +2,49 @@ import { TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DataTable } from "@/components/ui/data-table";
 import { MetricWidget } from "@/components/ui/metric-widget";
+import { getInventorySettings } from "@/lib/inventory-settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const [transactions, products] = await Promise.all([
+  const completedWhere = { createdAt: { gte: start }, status: TransactionStatus.COMPLETED };
+  const [transactions, transactionItems, products, inventorySettings] = await Promise.all([
     prisma.transaction.findMany({
-      where: { createdAt: { gte: start }, status: TransactionStatus.COMPLETED },
-      include: { items: { include: { product: true } } }
+      where: completedWhere,
+      select: {
+        id: true,
+        totalAmount: true,
+        paymentMethod: true,
+        cashAmount: true
+      }
     }),
-    prisma.product.findMany({ orderBy: { stockQty: "asc" } })
+    prisma.transactionItem.findMany({
+      where: { transaction: completedWhere },
+      select: {
+        productId: true,
+        qty: true,
+        subtotal: true,
+        costAtSale: true,
+        product: { select: { name: true } }
+      }
+    }),
+    prisma.product.findMany({
+      select: { id: true, name: true, sku: true, stockQty: true },
+      orderBy: { stockQty: "asc" },
+      take: 8
+    }),
+    getInventorySettings()
   ]);
 
-  const lowStock = products.filter((product) => Number(product.stockQty) <= Number(product.lowStockThreshold));
+  const lowStock = inventorySettings.enableLowStockAlerts
+    ? products.filter((product) => Number(product.stockQty) <= inventorySettings.lowStockThreshold)
+    : [];
   const todaySales = transactions.reduce((sum, transaction) => sum + Number(transaction.totalAmount), 0);
-  const todayProfit = transactions.reduce((sum, transaction) => {
-    const cost = transaction.items.reduce(
-      (itemSum, item) => itemSum + Number(item.costAtSale) * Number(item.qty),
-      0
-    );
-    return sum + Number(transaction.totalAmount) - cost;
-  }, 0);
+  const todayProfit =
+    todaySales -
+    transactionItems.reduce((sum, item) => sum + Number(item.costAtSale) * Number(item.qty), 0);
   const cashOnHand = transactions.reduce((sum, transaction) => {
     if (transaction.paymentMethod === "CASH") return sum + Number(transaction.totalAmount);
     if (transaction.paymentMethod === "SPLIT") return sum + Number(transaction.cashAmount ?? 0);
@@ -32,17 +52,15 @@ export default async function DashboardPage() {
   }, 0);
 
   const topSellingMap = new Map<string, { name: string; qty: number; sales: number }>();
-  for (const transaction of transactions) {
-    for (const item of transaction.items) {
-      const existing = topSellingMap.get(item.productId) ?? {
-        name: item.product.name,
-        qty: 0,
-        sales: 0
-      };
-      existing.qty += Number(item.qty);
-      existing.sales += Number(item.subtotal);
-      topSellingMap.set(item.productId, existing);
-    }
+  for (const item of transactionItems) {
+    const existing = topSellingMap.get(item.productId) ?? {
+      name: item.product.name,
+      qty: 0,
+      sales: 0
+    };
+    existing.qty += Number(item.qty);
+    existing.sales += Number(item.subtotal);
+    topSellingMap.set(item.productId, existing);
   }
   const topSelling = [...topSellingMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 8);
 
@@ -98,14 +116,26 @@ export default async function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {lowStock.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td>{item.sku}</td>
-                  <td>{Number(item.stockQty)}</td>
-                  <td>{Number(item.lowStockThreshold)}</td>
+              {inventorySettings.enableLowStockAlerts ? (
+                lowStock.length ? (
+                  lowStock.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.name}</td>
+                      <td>{item.sku}</td>
+                      <td>{Number(item.stockQty)}</td>
+                      <td>{inventorySettings.lowStockThreshold}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="muted">No low stock alerts.</td>
+                  </tr>
+                )
+              ) : (
+                <tr>
+                  <td colSpan={4} className="muted">Low stock alerts are disabled.</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </DataTable>

@@ -9,6 +9,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { assertPermission } from "@/lib/rbac";
 import { computeCartTotals, DiscountInput } from "@/lib/pricing";
+import { getInventorySettings } from "@/lib/inventory-settings";
 
 type SaleInput = {
   userId: string;
@@ -24,12 +25,8 @@ type SaleInput = {
   }>;
 };
 
-async function getAllowNegativeStock(tx: Prisma.TransactionClient) {
-  const setting = await tx.appSetting.findUnique({ where: { key: "allowNegativeStock" } });
-  return setting?.value === "true";
-}
-
 export async function createSale(input: SaleInput) {
+  const inventorySettings = await getInventorySettings();
   return prisma.$transaction(async (tx) => {
     const products = await tx.product.findMany({
       where: { id: { in: input.items.map((item) => item.productId) } }
@@ -39,7 +36,6 @@ export async function createSale(input: SaleInput) {
       throw new Error("Some products were not found");
     }
 
-    const allowNegativeStock = await getAllowNegativeStock(tx);
     const pricingLines = input.items.map((item) => {
       const product = products.find((p) => p.id === item.productId)!;
       return {
@@ -53,8 +49,8 @@ export async function createSale(input: SaleInput) {
     for (const item of input.items) {
       const product = products.find((p) => p.id === item.productId)!;
       const nextStock = Number(product.stockQty) - item.qty;
-      if (!allowNegativeStock && nextStock < 0) {
-        throw new Error(`Insufficient stock for ${product.name}`);
+      if (!inventorySettings.allowNegativeStock && nextStock < 0) {
+        throw new Error("Insufficient stock");
       }
     }
 
@@ -225,16 +221,18 @@ export async function pushOfflineOperations(
         });
       } else if (op.type === PendingOpType.ADJUSTMENT) {
         assertPermission(user.role, "INVENTORY_ADJUST");
+        const inventorySettings = await getInventorySettings();
+        if (!inventorySettings.allowManualStockAdjustments) {
+          throw new Error("Manual stock adjustments are disabled");
+        }
         const productId = op.payload.productId as string;
         const qtyDelta = Number(op.payload.qtyDelta);
         const reason = String(op.payload.reason ?? "Offline adjustment");
         await prisma.$transaction(async (tx) => {
           const product = await tx.product.findUnique({ where: { id: productId } });
           if (!product) throw new Error("Product not found");
-          const allowNegative = (await tx.appSetting.findUnique({ where: { key: "allowNegativeStock" } }))
-            ?.value;
-          if (allowNegative !== "true" && Number(product.stockQty) + qtyDelta < 0) {
-            throw new Error("Negative stock is not allowed");
+          if (!inventorySettings.allowNegativeStock && Number(product.stockQty) + qtyDelta < 0) {
+            throw new Error("Insufficient stock");
           }
           await tx.product.update({ where: { id: productId }, data: { stockQty: { increment: qtyDelta } } });
           await tx.stockMovement.create({
@@ -258,6 +256,7 @@ export async function pushOfflineOperations(
         });
       } else if (op.type === PendingOpType.REPACK) {
         assertPermission(user.role, "INVENTORY_ADJUST");
+        const inventorySettings = await getInventorySettings();
         const sourceProductId = String(op.payload.sourceProductId);
         const targetProductId = String(op.payload.targetProductId);
         const sourceQty = Number(op.payload.sourceQty);
@@ -270,9 +269,7 @@ export async function pushOfflineOperations(
             tx.product.findUnique({ where: { id: targetProductId } })
           ]);
           if (!source || !target) throw new Error("Invalid repack products");
-          const allowNegative = (await tx.appSetting.findUnique({ where: { key: "allowNegativeStock" } }))
-            ?.value;
-          if (allowNegative !== "true" && Number(source.stockQty) - sourceQty < 0) {
+          if (!inventorySettings.allowNegativeStock && Number(source.stockQty) - sourceQty < 0) {
             throw new Error("Insufficient source stock");
           }
           await tx.product.update({

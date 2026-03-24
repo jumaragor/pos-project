@@ -9,6 +9,7 @@ import { applyThemeToDocument } from "@/lib/theme";
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const isLogin = pathname.startsWith("/login");
 
   useEffect(() => {
@@ -50,13 +51,46 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
     });
   }
 
+  function openMobileNav() {
+    setMobileOpen(true);
+  }
+
+  function closeMobileNav() {
+    setMobileOpen(false);
+  }
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileOpen]);
+
   if (isLogin) {
     return <main className="login-shell">{children}</main>;
   }
   return (
     <div className={collapsed ? "app-shell app-shell-collapsed" : "app-shell"}>
-      <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
-      <DashboardLayout collapsed={collapsed}>
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={toggleSidebar}
+        mobileOpen={mobileOpen}
+        onMobileClose={closeMobileNav}
+      />
+      <DashboardLayout collapsed={collapsed} onMenuToggle={openMobileNav}>
         {children}
       </DashboardLayout>
     </div>
