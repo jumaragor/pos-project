@@ -1,0 +1,138 @@
+
+> microbiz@0.1.0 dev
+> next dev --port 3000
+
+   ▲ Next.js 15.5.12
+   - Local:        http://localhost:3000
+   - Network:      http://169.254.223.54:3000
+   - Environments: .env
+
+ ✓ Starting...
+> [PWA] PWA support is disabled
+> [PWA] PWA support is disabled
+ ✓ Ready in 3.7s
+ ○ Compiling /login ...
+ ✓ Compiled /login in 1528ms (682 modules)
+ GET /login 200 in 2394ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 3.1s (923 modules)
+ GET /api/auth/session 200 in 4835ms
+ GET /api/auth/session 200 in 63ms
+ GET /login 200 in 403ms
+ GET /api/auth/providers 200 in 100ms
+ GET /api/auth/csrf 200 in 30ms
+ POST /api/auth/callback/credentials 200 in 267ms
+ GET /api/auth/session 200 in 38ms
+ ○ Compiling /middleware ...
+ ✓ Compiled /middleware in 1403ms (216 modules)
+ ○ Compiling /dashboard ...
+ ✓ Compiled /dashboard in 695ms (925 modules)
+ GET /dashboard 200 in 970ms
+ ○ Compiling /api/sync/pull ...
+ ✓ Compiled /api/sync/pull in 738ms (941 modules)
+ GET /api/sync/pull?since= 200 in 1073ms
+ GET /api/sync/pull?since= 200 in 61ms
+ GET /dashboard 200 in 169ms
+ ○ Compiling /pos ...
+ ✓ Compiled /pos in 793ms (954 modules)
+ GET /pos 200 in 1036ms
+ ○ Compiling /api/pos/transactions ...
+ ✓ Compiled /api/pos/transactions in 535ms (956 modules)
+ GET /api/pos/transactions 200 in 653ms
+ GET /api/pos/transactions 200 in 47ms
+ GET /pos 200 in 93ms
+ ○ Compiling /inventory ...
+ ✓ Compiled /inventory in 536ms (964 modules)
+ GET /inventory 200 in 661ms
+ ○ Compiling /customers ...
+ ✓ Compiled /customers in 527ms (972 modules)
+ GET /customers 200 in 662ms
+ ○ Compiling /reports ...
+ ✓ Compiled /reports in 555ms (980 modules)
+ GET /reports 200 in 678ms
+ ○ Compiling /api/reports/summary ...
+ ✓ Compiled /api/reports/summary in 839ms (983 modules)
+ GET /api/reports/summary?preset=daily 200 in 1147ms
+ GET /api/reports/summary?preset=daily 200 in 55ms
+ ○ Compiling /settings ...
+ ✓ Compiled /settings in 872ms (990 modules)
+ GET /settings 200 in 1001ms
+ ○ Compiling /api/settings ...
+ ✓ Compiled /api/settings in 559ms (992 modules)
+ GET /api/settings 200 in 686ms
+ GET /api/settings 200 in 25ms
+ GET /dashboard 200 in 85ms
+ GET /pos 200 in 56ms
+ GET /api/pos/transactions 200 in 37ms
+ GET /api/pos/transactions 200 in 25ms
+ GET /inventory 200 in 74ms
+ GET /customers 200 in 65ms
+ ○ Compiling /users ...
+ ✓ Compiled /users in 987ms (996 modules)
+ GET /users 200 in 1129ms
+ GET /users 200 in 44ms
+ ○ Compiling /api/users ...
+ ✓ Compiled /api/users in 616ms (998 modules)
+ GET /api/users 200 in 748ms
+ GET /api/users 200 in 65ms
+ GET /users 200 in 83ms
+ GET /settings 200 in 56ms
+ GET /api/settings 200 in 42ms
+ GET /api/settings 200 in 47ms
+ GET /users 200 in 48ms
+ GET /api/users 200 in 37ms
+ GET /api/users 200 in 44ms
+ ✓ Compiled /api/auth/[...nextauth] in 354ms (697 modules)
+ GET /api/auth/csrf 200 in 549ms
+ POST /api/auth/signout 200 in 44ms
+ ✓ Compiled /login in 344ms (702 modules)
+ GET /login 200 in 696ms
+ GET /api/auth/session 200 in 101ms
+ GET /api/auth/providers 200 in 62ms
+ GET /api/auth/csrf 200 in 43ms
+ POST /api/auth/callback/credentials 401 in 161ms
+ GET /api/auth/providers 200 in 99ms
+ GET /api/auth/csrf 200 in 45ms
+ POST /api/auth/callback/credentials 200 in 113ms
+ GET /api/auth/session 200 in 34ms
+ GET /dashboard 200 in 71ms
+ ✓ Compiled /api/sync/pull in 414ms (704 modules)
+ GET /api/sync/pull?since=2026-02-22T14%3A02%3A32.065Z 200 in 576ms
+ GET /api/sync/pull?since=2026-02-22T14%3A02%3A32.065Z 200 in 44ms
+ GET /settings 200 in 124ms
+ GET /api/settings 200 in 90ms
+ GET /api/settings 200 in 25ms
+ GET /users 200 in 49ms
+ GET /api/users 200 in 65ms
+ GET /api/users 200 in 45ms
+ GET /login 200 in 405ms
+ GET /api/auth/session 200 in 100ms
+ GET /api/auth/providers 200 in 50ms
+ GET /api/auth/csrf 200 in 30ms
+ POST /api/auth/callback/credentials 200 in 119ms
+ GET /api/auth/session 200 in 38ms
+ GET /dashboard 200 in 77ms
+ GET /api/sync/pull?since=2026-02-22T14%3A04%3A15.072Z 200 in 49ms
+ GET /api/sync/pull?since=2026-02-22T14%3A04%3A15.072Z 200 in 53ms
+ GET /dashboard 200 in 51ms
+ GET /dashboard 200 in 54ms
+ GET /dashboard 200 in 54ms
+ GET /dashboard 200 in 56ms
+ GET /pos 200 in 78ms
+ ○ Compiling /api/pos/transactions ...
+ ✓ Compiled /api/pos/transactions in 701ms (700 modules)
+ GET /api/pos/transactions 200 in 832ms
+ GET /api/pos/transactions 200 in 25ms
+ ✓ Compiled /customers in 356ms (696 modules)
+ GET /customers 200 in 553ms
+ GET /users 200 in 65ms
+ ○ Compiling /api/users ...
+ ✓ Compiled /api/users in 595ms (699 modules)
+ GET /api/users 200 in 808ms
+ GET /api/users 200 in 57ms
+ ✓ Compiled /settings in 380ms (704 modules)
+ GET /settings 200 in 563ms
+ GET /settings 200 in 43ms
+ ✓ Compiled /api/settings in 386ms (706 modules)
+ GET /api/settings 200 in 558ms
+ GET /api/settings 200 in 25ms
