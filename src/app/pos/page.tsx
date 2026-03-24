@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { PosWorkspace } from "@/components/pos/pos-workspace";
 
+export const dynamic = "force-dynamic";
+
 export default async function POSPage() {
   const [products, customers] = await Promise.all([
     prisma.product.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),

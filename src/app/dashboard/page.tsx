@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { DataTable } from "@/components/ui/data-table";
 import { MetricWidget } from "@/components/ui/metric-widget";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);

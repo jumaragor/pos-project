@@ -1,6 +1,8 @@
 import { PurchasesScreen } from "@/components/purchases-screen";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export default async function PurchasesPage() {
   const [purchases, products, suppliers] = await Promise.all([
     prisma.purchase.findMany({

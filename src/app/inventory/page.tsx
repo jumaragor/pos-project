@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { InventoryScreen } from "@/components/inventory-screen";
 
+export const dynamic = "force-dynamic";
+
 export default async function InventoryPage() {
   const products = await prisma.product.findMany({
     where: { isActive: true },
