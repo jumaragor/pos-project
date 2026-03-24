@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  CASHIER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PaymentMethod {
+  CASH
+  QR
+  SPLIT
+}
+
+enum TransactionStatus {
+  COMPLETED
+  VOID
+  REFUNDED
+}
+
+enum StockMovementType {
+  SALE
+  REFUND
+  STOCK_IN
+  ADJUSTMENT
+  REPACK_IN
+  REPACK_OUT
+}
+
+enum PendingOpType {
+  SALE
+  ADJUSTMENT
+  REPACK
+}
+
+enum PurchaseStatus {
+  DRAFT
+  POSTED
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  username     String?       @unique
+  email        String        @unique
+  passwordHash String
+  role         Role
+  status       UserStatus    @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+  stockMoves   StockMovement[]
+  auditLogs    AuditLog[]    @relation("AuditActor")
+}
+
+model Product {
+  id                String            @id @default(cuid())
+  name              String
+  sku               String            @unique
+  category          String
+  description       String?
+  compatibleUnits   String?
+  unit              String
+  barcode           String?           @unique
+  photoUrl          String?
+  costPrice         Decimal           @db.Decimal(12, 2)
+  sellingPrice      Decimal           @db.Decimal(12, 2)
+  stockQty          Decimal           @db.Decimal(12, 3)
+  allowNegativeStock Boolean          @default(false)
+  isActive          Boolean           @default(true)
+  lowStockThreshold Decimal           @db.Decimal(12, 3) @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  items             TransactionItem[]
+  purchaseItems     PurchaseItem[]
+  stockMoves        StockMovement[]
+  conversionRules   UnitConversionRule[]
+}
+
+model Customer {
+  id           String        @id @default(cuid())
+  name         String
+  mobile       String
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+}
+
+model Transaction {
+  id            String            @id @default(cuid())
+  number        String            @unique
+  customerId    String?
+  userId        String
+  totalAmount   Decimal           @db.Decimal(12, 2)
+  discountTotal Decimal           @db.Decimal(12, 2)
+  paymentMethod PaymentMethod
+  cashAmount    Decimal?          @db.Decimal(12, 2)
+  qrAmount      Decimal?          @db.Decimal(12, 2)
+  status        TransactionStatus @default(COMPLETED)
+  createdAt     DateTime          @default(now())
+  customer      Customer?         @relation(fields: [customerId], references: [id])
+  user          User              @relation(fields: [userId], references: [id])
+  items         TransactionItem[]
+}
+
+model TransactionItem {
+  id            String      @id @default(cuid())
+  transactionId String
+  productId     String
+  qty           Decimal     @db.Decimal(12, 3)
+  price         Decimal     @db.Decimal(12, 2)
+  costAtSale    Decimal     @db.Decimal(12, 2)
+  subtotal      Decimal     @db.Decimal(12, 2)
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  product       Product     @relation(fields: [productId], references: [id])
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  type      StockMovementType
+  productId String
+  qtyDelta  Decimal           @db.Decimal(12, 3)
+  reason    String?
+  refId     String?
+  userId    String
+  createdAt DateTime          @default(now())
+  product   Product           @relation(fields: [productId], references: [id])
+  user      User              @relation(fields: [userId], references: [id])
+}
+
+model UnitConversionRule {
+  id        String   @id @default(cuid())
+  fromUnit  String
+  toUnit    String
+  factor    Decimal  @db.Decimal(12, 3)
+  productId String?
+  createdAt DateTime @default(now())
+  product   Product? @relation(fields: [productId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  action      String
+  entityType  String
+  entityId    String
+  metadataJson Json
+  createdAt   DateTime @default(now())
+  actor       User     @relation("AuditActor", fields: [actorUserId], references: [id])
+}
+
+model SyncOperation {
+  id           String        @id @default(cuid())
+  opId         String        @unique
+  opType       PendingOpType
+  status       String
+  payloadJson  Json
+  processedAt  DateTime      @default(now())
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Purchase {
+  id              String         @id @default(cuid())
+  purchaseNumber  String         @unique
+  purchaseDate    DateTime
+  supplierId      String?
+  supplierName    String?
+  referenceNumber String?
+  notes           String?
+  totalItems      Decimal        @db.Decimal(12, 3)
+  totalCost       Decimal        @db.Decimal(12, 2)
+  status          PurchaseStatus @default(POSTED)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  supplier        Supplier?      @relation(fields: [supplierId], references: [id])
+  items           PurchaseItem[]
+}
+
+model PurchaseItem {
+  id          String   @id @default(cuid())
+  purchaseId  String
+  productId   String
+  productName String
+  quantity    Decimal  @db.Decimal(12, 3)
+  unitCost    Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2) @default(0)
+  taxRate     Decimal  @db.Decimal(5, 2) @default(0)
+  taxAmount   Decimal  @db.Decimal(12, 2) @default(0)
+  lineTotal   Decimal  @db.Decimal(12, 2)
+  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id])
+}
+
+model Supplier {
+  id            String         @id @default(cuid())
+  supplierCode  String         @unique
+  supplierName  String
+  contactPerson String?
+  mobileNumber  String?
+  emailAddress  String?
+  address       String?
+  notes         String?
+  status        SupplierStatus @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  purchases     Purchase[]
+}
