@@ -8,6 +8,12 @@ import { generateProductSku, getProductSettings } from "@/lib/product-settings";
 import { getInventorySettings } from "@/lib/inventory-settings";
 import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
 
+function normalizeOptionalText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim();
   const filter = request.nextUrl.searchParams.get("filter") ?? "active";
@@ -138,21 +144,24 @@ export async function POST(request: NextRequest) {
       return badRequest("Inactive categories cannot be assigned to new products");
     }
     const trimmedSku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
-    if (!trimmedSku && settings.requireSKU && !settings.autoGenerateSKU) {
+    if (!settings.autoGenerateSKU && !trimmedSku) {
       return badRequest("SKU is required");
     }
-    const sku =
-      trimmedSku || (settings.autoGenerateSKU || !settings.requireSKU ? await generateProductSku(categoryId) : "");
+    if (settings.autoGenerateSKU && !categoryId) {
+      return badRequest("Category is required before generating SKU.");
+    }
+    const sku = settings.autoGenerateSKU ? await generateProductSku(categoryId) : trimmedSku;
     if (!sku) {
       return badRequest("SKU is required");
     }
+    const normalizedBarcode = normalizeOptionalText(body.barcode);
     const product = await prisma.product.create({
       data: {
         name: body.name,
         sku,
         description: body.description,
         compatibleUnits: settings.enableCompatibleUnits ? body.compatibleUnits : null,
-        barcode: body.barcode,
+        barcode: normalizedBarcode,
         photoUrl: body.photoUrl,
         categoryId: settings.enableProductCategories ? categoryId : null,
         category: settings.enableProductCategories ? category?.name ?? "General" : "General",
@@ -167,6 +176,18 @@ export async function POST(request: NextRequest) {
     });
     return created(product);
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(", ") : String(error.meta?.target ?? "");
+      if (target.includes("barcode")) {
+        return badRequest("Barcode already exists. Please use a unique barcode or leave it blank.");
+      }
+      if (target.includes("sku")) {
+        return badRequest("SKU already exists. Please use a unique SKU.");
+      }
+    }
+    if (error instanceof Error && /Category is required|configured SKU prefix/i.test(error.message)) {
+      return badRequest(error.message);
+    }
     return serverError(error instanceof Error ? error.message : "Failed to create product");
   }
 }

@@ -25,6 +25,7 @@ enum PaymentMethod {
 }
 
 enum TransactionStatus {
+  DRAFT
   COMPLETED
   VOID
   REFUNDED

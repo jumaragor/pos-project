@@ -1,3 +1,4 @@
+import { TransactionStatus } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { badRequest, created, ok } from "@/lib/http";
@@ -35,7 +36,8 @@ export async function GET(request: NextRequest) {
         where: {
           customerId: {
             in: customers.map((customer) => customer.id)
-          }
+          },
+          status: TransactionStatus.COMPLETED
         },
         _sum: { totalAmount: true },
         _count: { _all: true },

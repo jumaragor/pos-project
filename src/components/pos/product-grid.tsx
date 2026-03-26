@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { ProductLite } from "@/components/pos/types";
+import { formatCurrency } from "@/lib/format";
 
 type ProductGridProps = {
   products: ProductLite[];
+  showProductPhotos?: boolean;
   showCompatibleUnits?: boolean;
   showLowStockAlerts?: boolean;
   lowStockThreshold?: number;
@@ -30,6 +32,7 @@ function ProductImage({ product }: { product: ProductLite }) {
 
 export function ProductGrid({
   products,
+  showProductPhotos = true,
   showCompatibleUnits = true,
   showLowStockAlerts = true,
   lowStockThreshold = 0,
@@ -41,10 +44,10 @@ export function ProductGrid({
         const lowStock = showLowStockAlerts && product.stockQty <= lowStockThreshold;
         return (
           <button key={product.id} type="button" className="pos-product-card" onClick={() => onAdd(product)}>
-            <ProductImage product={product} />
+            {showProductPhotos ? <ProductImage product={product} /> : null}
             <div className="pos-product-name">{product.name}</div>
             <div className="pos-product-meta">
-              <span className="pos-product-price">PHP {product.sellingPrice.toFixed(2)}</span>
+              <span className="pos-product-price">{formatCurrency(product.sellingPrice)}</span>
               {lowStock ? <span className="pos-stock-badge">Low Stock</span> : null}
             </div>
             <div className="pos-product-sku">{product.sku}</div>

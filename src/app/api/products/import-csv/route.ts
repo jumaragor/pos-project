@@ -2,6 +2,12 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { badRequest, ok, serverError } from "@/lib/http";
 
+function normalizeOptionalText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -12,6 +18,7 @@ export async function POST(request: NextRequest) {
     const created = [];
     for (const row of rows) {
       const categoryName = row.category ?? "General";
+      const normalizedBarcode = normalizeOptionalText(row.barcode);
       const category = await prisma.category.findFirst({
         where: { name: { equals: categoryName, mode: "insensitive" } },
         select: { id: true, name: true }
@@ -20,7 +27,7 @@ export async function POST(request: NextRequest) {
         where: { sku: row.sku },
         update: {
           name: row.name,
-          barcode: row.barcode,
+          barcode: normalizedBarcode,
           categoryId: category?.id ?? null,
           category: category?.name ?? categoryName,
           unit: row.unit ?? "pc",
@@ -32,7 +39,7 @@ export async function POST(request: NextRequest) {
         create: {
           name: row.name,
           sku: row.sku,
-          barcode: row.barcode,
+          barcode: normalizedBarcode,
           categoryId: category?.id ?? null,
           category: category?.name ?? categoryName,
           unit: row.unit ?? "pc",

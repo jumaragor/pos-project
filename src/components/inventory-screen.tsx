@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { useToast } from "@/components/toast-provider";
+import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   normalizeDecimalInput,
   normalizeIntegerInput,
@@ -50,6 +51,23 @@ type CategoryOption = {
   skuPrefix: string;
   status: "ACTIVE" | "INACTIVE";
 };
+type InventoryImportPreviewRow = {
+  rowNumber: number;
+  sku: string;
+  name: string;
+  category: string;
+  description: string;
+  price: number | null;
+  stockQty: number | null;
+  compatibleUnits: string;
+  isActive: boolean;
+  errors: string[];
+};
+type InventoryImportSummary = {
+  totalRows: number;
+  successfulRows: number;
+  failedRows: number;
+};
 
 type SortKey = "name" | "sku" | "category" | "stockQty" | "sellingPrice";
 type InventoryFilter = "active" | "archived" | "all";
@@ -57,9 +75,7 @@ type ProductBehaviorSettings = {
   enableProductCategories: boolean;
   enableCompatibleUnits: boolean;
   allowProductPhotoUpload: boolean;
-  requireSKU: boolean;
   autoGenerateSKU: boolean;
-  skuGenerationMode: "MANUAL" | "GLOBAL" | "CATEGORY_BASED";
   allowNegativeStock: boolean;
   lowStockThreshold: number;
   allowManualStockAdjustments: boolean;
@@ -71,9 +87,7 @@ const defaultProductBehaviorSettings: ProductBehaviorSettings = {
   enableProductCategories: true,
   enableCompatibleUnits: true,
   allowProductPhotoUpload: true,
-  requireSKU: true,
   autoGenerateSKU: false,
-  skuGenerationMode: "GLOBAL",
   allowNegativeStock: false,
   lowStockThreshold: 10,
   allowManualStockAdjustments: true,
@@ -103,6 +117,11 @@ export function InventoryScreen({
   const [productSettings, setProductSettings] = useState<ProductBehaviorSettings>(
     defaultProductBehaviorSettings
   );
+  const inventoryTableColumns =
+    5 +
+    (productSettings.allowProductPhotoUpload ? 1 : 0) +
+    (productSettings.enableProductCategories ? 1 : 0) +
+    2;
   const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>("active");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [query, setQuery] = useState("");
@@ -113,6 +132,7 @@ export function InventoryScreen({
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [activeProduct, setActiveProduct] = useState<ProductRow | null>(null);
   const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoPreview, setCreatePhotoPreview] = useState<string | null>(null);
@@ -144,19 +164,28 @@ export function InventoryScreen({
   const [adjustQtyInput, setAdjustQtyInput] = useState("0");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustSaving, setAdjustSaving] = useState(false);
+  const [skuPreviewError, setSkuPreviewError] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importPreviewRows, setImportPreviewRows] = useState<InventoryImportPreviewRow[]>([]);
+  const [importSummary, setImportSummary] = useState<InventoryImportSummary | null>(null);
+  const [importRawRows, setImportRawRows] = useState<Array<Record<string, unknown>>>([]);
+  const [importingPreview, setImportingPreview] = useState(false);
+  const [importingRows, setImportingRows] = useState(false);
   const createPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    if (!editOpen) return;
+    const anyModalOpen = createOpen || editOpen || cameraOpen || adjustOpen || importOpen;
+    if (!anyModalOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editOpen]);
+  }, [adjustOpen, cameraOpen, createOpen, editOpen, importOpen]);
 
   useEffect(() => {
     setCameraSupported(
@@ -181,6 +210,38 @@ export function InventoryScreen({
       setSelectedCategory("ALL");
     }
   }, [productSettings.enableProductCategories]);
+
+  useEffect(() => {
+    if (!createOpen || !productSettings.autoGenerateSKU) {
+      setSkuPreviewError("");
+      return;
+    }
+    if (!form.categoryId) {
+      setSkuPreviewError("Select a category first to generate SKU.");
+      setForm((prev) => ({ ...prev, sku: "" }));
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSkuPreview() {
+      const response = await fetch(`/api/products/next-sku?categoryId=${encodeURIComponent(form.categoryId)}`);
+      const payload = await response.json();
+      if (cancelled) return;
+      if (!response.ok) {
+        setSkuPreviewError(payload.error ?? "Unable to generate SKU.");
+        setForm((prev) => ({ ...prev, sku: "" }));
+        return;
+      }
+      setSkuPreviewError("");
+      setForm((prev) => ({ ...prev, sku: payload.sku ?? "" }));
+    }
+
+    void loadSkuPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [createOpen, form.categoryId, productSettings.autoGenerateSKU]);
 
   const refresh = useCallback(
     async (nextPage = page, nextQuery = query) => {
@@ -285,7 +346,122 @@ export function InventoryScreen({
     setSortDir("asc");
   }
 
+  function resetImportState() {
+    setImportFileName("");
+    setImportPreviewRows([]);
+    setImportSummary(null);
+    setImportRawRows([]);
+    setImportingPreview(false);
+    setImportingRows(false);
+    if (importFileInputRef.current) {
+      importFileInputRef.current.value = "";
+    }
+  }
+
+  function openImport() {
+    resetImportState();
+    setImportOpen(true);
+  }
+
+  function closeImport() {
+    setImportOpen(false);
+    resetImportState();
+  }
+
+  function triggerImportPicker() {
+    importFileInputRef.current?.click();
+  }
+
+  function exportInventory() {
+    window.location.href = "/api/products/export";
+  }
+
+  function downloadImportTemplate() {
+    window.location.href = "/api/products/import/template";
+  }
+
+  async function previewImportRowsFromFile(
+    rows: Array<Record<string, unknown>>,
+    fileName: string
+  ) {
+    setImportingPreview(true);
+    try {
+      const response = await fetch("/api/products/import/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        alert(payload.error ?? "Failed to preview import file");
+        return;
+      }
+      setImportFileName(fileName);
+      setImportRawRows(rows);
+      setImportPreviewRows(payload.rows ?? []);
+      setImportSummary(payload.summary ?? null);
+    } finally {
+      setImportingPreview(false);
+    }
+  }
+
+  async function onImportFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const firstSheet = workbook.SheetNames[0];
+      if (!firstSheet) {
+        alert("The selected file does not contain any worksheet data.");
+        return;
+      }
+      const worksheet = workbook.Sheets[firstSheet];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+      if (!rows.length) {
+        alert("The selected file does not contain any inventory rows.");
+        return;
+      }
+      await previewImportRowsFromFile(rows, file.name);
+    } catch {
+      alert("Failed to read the selected file. Please use a valid Excel or CSV file.");
+    }
+  }
+
+  async function importInventoryRows() {
+    if (!importRawRows.length) {
+      alert("Upload a file first.");
+      return;
+    }
+    setImportingRows(true);
+    try {
+      const response = await fetch("/api/products/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: importRawRows })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        alert(payload.error ?? "Failed to import inventory");
+        return;
+      }
+      setImportPreviewRows(payload.failures ?? importPreviewRows);
+      setImportSummary(payload.summary ?? null);
+      await refresh(1, query);
+      setPage(1);
+      success(
+        payload.summary?.successfulRows
+          ? `Imported ${payload.summary.successfulRows} item(s) successfully`
+          : "No rows were imported"
+      );
+    } finally {
+      setImportingRows(false);
+    }
+  }
+
   function openCreate() {
+    setSkuPreviewError("");
     setForm({
       name: "",
       sku: "",
@@ -310,6 +486,7 @@ export function InventoryScreen({
   }
 
   function openEdit(product: ProductRow) {
+    setSkuPreviewError("");
     setActiveProduct(product);
     setForm({
       name: product.name,
@@ -471,19 +648,6 @@ export function InventoryScreen({
     setCreatePhotoFromFile(file);
   }
 
-  function onEditPhotoSelected(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    setEditPhotoFile(file);
-    if (editPhotoPreview?.startsWith("blob:")) {
-      URL.revokeObjectURL(editPhotoPreview);
-    }
-    if (!file) {
-      setEditPhotoPreview(activeProduct?.photoUrl ?? null);
-      return;
-    }
-    setEditPhotoPreview(URL.createObjectURL(file));
-  }
-
   function clearEditPhoto() {
     if (editPhotoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(editPhotoPreview);
@@ -497,7 +661,11 @@ export function InventoryScreen({
       alert("Product Name is required");
       return;
     }
-    if (productSettings.requireSKU && !productSettings.autoGenerateSKU && !form.sku.trim()) {
+    if (productSettings.autoGenerateSKU && !form.categoryId) {
+      alert("Category is required before generating SKU.");
+      return;
+    }
+    if (!productSettings.autoGenerateSKU && !form.sku.trim()) {
       alert("SKU is required");
       return;
     }
@@ -545,7 +713,11 @@ export function InventoryScreen({
       alert("Product Name is required");
       return;
     }
-    if (productSettings.requireSKU && !productSettings.autoGenerateSKU && !form.sku.trim()) {
+    if (productSettings.autoGenerateSKU && !form.categoryId) {
+      alert("Category is required before generating SKU.");
+      return;
+    }
+    if (!productSettings.autoGenerateSKU && !form.sku.trim()) {
       alert("SKU is required");
       return;
     }
@@ -669,104 +841,107 @@ export function InventoryScreen({
 
   return (
     <div className="inventory-admin">
-      <div className="inventory-kpis">
-        <div className="inventory-kpi-card">
-          <div className="inventory-kpi-icon">#</div>
-          <div className="inventory-kpi-label">Total Items</div>
-          <div className="inventory-kpi-value">{metrics.totalItems}</div>
-        </div>
-        <div className="inventory-kpi-card">
-          <div className="inventory-kpi-icon">LOW</div>
-          <div className="inventory-kpi-label">Low Stock Items</div>
-          <div className="inventory-kpi-value">{metrics.lowStockItems}</div>
-        </div>
-        <div className="inventory-kpi-card">
-          <div className="inventory-kpi-icon">CAT</div>
-          <div className="inventory-kpi-label">Available Categories</div>
-          <div className="inventory-kpi-value">{metrics.availableCategories}</div>
-        </div>
-        <div className="inventory-kpi-card">
-          <div className="inventory-kpi-icon">PHP</div>
-          <div className="inventory-kpi-label">Inventory Value</div>
-          <div className="inventory-kpi-value">PHP {metrics.inventoryValue.toLocaleString("en-PH", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}</div>
-        </div>
+      <div className="inventory-summary-bar">
+        <span className="inventory-summary-item">
+          <span className="inventory-summary-label">Total Items:</span>
+          <strong>{metrics.totalItems}</strong>
+        </span>
+        <span className="inventory-summary-divider" aria-hidden>
+          |
+        </span>
+        <span className="inventory-summary-item">
+          <span className="inventory-summary-label">Inventory Value:</span>
+          <strong>{formatCurrency(metrics.inventoryValue)}</strong>
+        </span>
       </div>
 
       <div className="card">
         <div className="inventory-table-head">
-          <h2 className="section-title">Inventory</h2>
-          <PrimaryButton className="inventory-add-btn" onClick={openCreate}>
-            + Add Item
-          </PrimaryButton>
+          <div className="inventory-title-group">
+            <h2 className="section-title">Inventory</h2>
+            {productSettings.enableLowStockAlerts && metrics.lowStockItems > 0 ? (
+              <span className="inventory-low-stock-pill">
+                Low Stock: {metrics.lowStockItems}
+              </span>
+            ) : null}
+          </div>
+          <div className="inventory-header-actions">
+            {isAdmin ? (
+              <>
+                <SecondaryButton className="inventory-action-btn" onClick={openImport}>
+                  Import
+                </SecondaryButton>
+                <SecondaryButton className="inventory-action-btn" onClick={exportInventory}>
+                  Export
+                </SecondaryButton>
+                <PrimaryButton className="inventory-add-btn" onClick={openCreate}>
+                  + Add Item
+                </PrimaryButton>
+              </>
+            ) : null}
+          </div>
         </div>
 
         <div className="inventory-toolbar-search">
-          <div className="row inventory-filter-row">
-            <button
-              type="button"
-              className={inventoryFilter === "active" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => {
-                setInventoryFilter("active");
-                setPage(1);
-              }}
-            >
-              Active
-            </button>
-            <button
-              type="button"
-              className={inventoryFilter === "archived" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => {
-                setInventoryFilter("archived");
-                setPage(1);
-              }}
-            >
-              Archived
-            </button>
-            <button
-              type="button"
-              className={inventoryFilter === "all" ? "configuration-tab active" : "configuration-tab"}
-              onClick={() => {
-                setInventoryFilter("all");
-                setPage(1);
-              }}
-            >
-              All
-            </button>
-          </div>
-          {productSettings.enableProductCategories ? (
-            <div className="row inventory-filter-row">
-              <select
-                value={selectedCategory}
-                onChange={(event) => {
-                  setSelectedCategory(event.target.value);
+          <div className="inventory-filter-bar">
+            <div className="row inventory-filter-row inventory-status-segment">
+              <button
+                type="button"
+                className={inventoryFilter === "active" ? "configuration-tab active" : "configuration-tab"}
+                onClick={() => {
+                  setInventoryFilter("active");
                   setPage(1);
                 }}
               >
-                <option value="ALL">All Categories</option>
-                {categoryOptions.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
+                Active
+              </button>
+              <button
+                type="button"
+                className={inventoryFilter === "archived" ? "configuration-tab active" : "configuration-tab"}
+                onClick={() => {
+                  setInventoryFilter("archived");
+                  setPage(1);
+                }}
+              >
+                Archived
+              </button>
             </div>
-          ) : null}
-          <input
-            placeholder="Search product name / SKU / barcode"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(1);
-            }}
-            className="inventory-search"
-          />
+            <div className="inventory-filter-controls">
+              <input
+                placeholder="Search product name / SKU / barcode"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                className="inventory-search"
+              />
+              {productSettings.enableProductCategories ? (
+                <select
+                  value={selectedCategory}
+                  onChange={(event) => {
+                    setSelectedCategory(event.target.value);
+                    setPage(1);
+                  }}
+                  className="inventory-category-select"
+                >
+                  <option value="ALL">All Categories</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+          </div>
         </div>
 
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Photo</th>
+                {productSettings.allowProductPhotoUpload ? <th>Photo</th> : null}
                 <th>
                   <button type="button" className="table-sort-btn" onClick={() => changeSort("name")}>
                     Product Name
@@ -805,7 +980,7 @@ export function InventoryScreen({
             <tbody>
               {loadingList ? (
                 <tr>
-                  <td colSpan={productSettings.enableProductCategories ? 8 : 7} className="muted">
+                  <td colSpan={inventoryTableColumns} className="muted">
                     Loading inventory...
                   </td>
                 </tr>
@@ -814,24 +989,24 @@ export function InventoryScreen({
                 const stockStatus = getStockStatus(item);
                 return (
                 <tr key={item.id}>
-                  <td>
-                    {item.photoUrl ? (
-                      <Image
-                        src={item.photoUrl}
-                        alt={item.name}
-                        width={44}
-                        height={44}
-                        className="inventory-thumb"
-                      />
-                    ) : (
-                      <span className="inventory-photo-empty">No photo</span>
-                    )}
-                  </td>
+                  {productSettings.allowProductPhotoUpload ? (
+                    <td>
+                      {item.photoUrl ? (
+                        <Image
+                          src={item.photoUrl}
+                          alt={item.name}
+                          width={44}
+                          height={44}
+                          className="inventory-thumb"
+                        />
+                      ) : null}
+                    </td>
+                  ) : null}
                   <td>{item.name}</td>
                   <td>{item.sku}</td>
                   {productSettings.enableProductCategories ? <td>{item.category}</td> : null}
-                  <td>{item.stockQty}</td>
-                  <td>PHP {item.sellingPrice.toFixed(2)}</td>
+                  <td>{formatNumber(item.stockQty)}</td>
+                  <td>{formatCurrency(item.sellingPrice)}</td>
                   <td>
                     <span className={`badge ${stockStatus.className}`}>{stockStatus.label}</span>
                   </td>
@@ -906,11 +1081,121 @@ export function InventoryScreen({
         </div>
       </div>
 
+      {importOpen ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal inventory-import-modal inventory-modal-responsive">
+            <div className="inventory-modal-header">
+              <h3 className="section-title">Import Inventory</h3>
+            </div>
+            <div className="inventory-modal-body">
+              <div className="stack">
+                <div className="inventory-import-toolbar">
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={onImportFileSelected}
+                    className="inventory-upload-input"
+                  />
+                  <SecondaryButton type="button" onClick={triggerImportPicker}>
+                    Upload File
+                  </SecondaryButton>
+                  <SecondaryButton type="button" onClick={downloadImportTemplate}>
+                    Download Template
+                  </SecondaryButton>
+                </div>
+
+                <div className="field-help">
+                  Supported columns: SKU, Product Name, Category, Description, Price, Current Stock,
+                  Compatible Units, Active Status.
+                </div>
+
+                {importFileName ? (
+                  <div className="inventory-import-file">Selected file: {importFileName}</div>
+                ) : null}
+
+                {importingPreview ? (
+                  <div className="muted">Reading file and validating rows...</div>
+                ) : null}
+
+                {importSummary ? (
+                  <div className="inventory-import-summary">
+                    <span>Total Rows: {importSummary.totalRows}</span>
+                    <span>Successful Rows: {importSummary.successfulRows}</span>
+                    <span>Failed Rows: {importSummary.failedRows}</span>
+                  </div>
+                ) : null}
+
+                {importPreviewRows.length ? (
+                  <div className="table-wrap inventory-import-preview">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Row</th>
+                          <th>SKU</th>
+                          <th>Product Name</th>
+                          <th>Category</th>
+                          <th>Price</th>
+                          <th>Stock</th>
+                          <th>Status</th>
+                          <th>Validation</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreviewRows.map((row) => (
+                          <tr key={`${row.rowNumber}-${row.sku}-${row.name}`}>
+                            <td>{row.rowNumber}</td>
+                            <td>{row.sku || "-"}</td>
+                            <td>{row.name || "-"}</td>
+                            <td>{row.category || "-"}</td>
+                            <td>{row.price == null ? "-" : formatCurrency(row.price)}</td>
+                            <td>{row.stockQty == null ? "-" : formatNumber(row.stockQty)}</td>
+                            <td>{row.isActive ? "Active" : "Inactive"}</td>
+                            <td>
+                              {row.errors.length ? (
+                                <div className="inventory-import-errors">
+                                  {row.errors.map((error) => (
+                                    <span key={error} className="inventory-import-error-chip">
+                                      {error}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="inventory-import-ok">Ready</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="row inventory-modal-footer">
+              <SecondaryButton type="button" onClick={closeImport}>
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                type="button"
+                onClick={importInventoryRows}
+                disabled={!importSummary || importSummary.successfulRows === 0 || importingRows}
+              >
+                {importingRows ? "Importing..." : "Import Rows"}
+              </PrimaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {createOpen ? (
         <div className="inventory-modal-overlay">
-          <div className="inventory-modal">
-            <h3 className="section-title">Add Item</h3>
-            <div className="stack">
+          <div className="inventory-modal inventory-modal-responsive inventory-modal-create">
+            <div className="inventory-modal-header">
+              <h3 className="section-title">Add Item</h3>
+            </div>
+            <div className="inventory-modal-body">
+              <div className="stack">
               <div className="form-field">
                 <label className="field-label">Product Name</label>
                 <input
@@ -922,24 +1207,17 @@ export function InventoryScreen({
               <div className="form-field">
                 <label className="field-label">SKU</label>
                 <input
-                  placeholder={
-                    productSettings.autoGenerateSKU
-                      ? productSettings.skuGenerationMode === "CATEGORY_BASED"
-                        ? "Leave blank to use category prefix"
-                        : "Leave blank to auto-generate"
-                      : "Enter SKU"
-                  }
+                  placeholder={productSettings.autoGenerateSKU ? "Generated from category" : "Enter SKU"}
                   value={form.sku}
                   onChange={(event) => setForm({ ...form, sku: event.target.value })}
+                  readOnly={productSettings.autoGenerateSKU}
                 />
                 {productSettings.autoGenerateSKU ? (
                   <div className="field-help">
-                    SKU will be auto-generated if left blank.
-                    {productSettings.skuGenerationMode === "CATEGORY_BASED"
-                      ? " The selected category prefix will be used."
-                      : ""}
+                    SKU will be generated automatically based on category.
                   </div>
                 ) : null}
+                {skuPreviewError ? <div className="login-error">{skuPreviewError}</div> : null}
               </div>
               <div className="form-field">
                 <label className="field-label">Description</label>
@@ -1100,7 +1378,8 @@ export function InventoryScreen({
                 </div>
               ) : null}
             </div>
-            <div className="row" style={{ marginTop: 12 }}>
+            </div>
+            <div className="row inventory-modal-footer">
               <SecondaryButton
                 onClick={() => {
                   setCreateOpen(false);
@@ -1123,137 +1402,105 @@ export function InventoryScreen({
             </div>
             <div className="inventory-modal-body">
               <div className="stack">
-              <div className="form-field">
-                <label className="field-label">Product Name</label>
-                <input
-                  placeholder="Product Name"
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                />
-              </div>
-              <div className="form-field">
-                <label className="field-label">SKU</label>
-                <input
-                  placeholder="SKU"
-                  value={form.sku}
-                  onChange={(event) => setForm({ ...form, sku: event.target.value })}
-                />
-                {productSettings.autoGenerateSKU ? (
-                  <div className="field-help">
-                    If blank, the existing SKU will be retained or a new one generated.
-                    {productSettings.skuGenerationMode === "CATEGORY_BASED"
-                      ? " Category prefix will be used for newly generated SKUs."
-                      : ""}
-                  </div>
-                ) : null}
-              </div>
-              <div className="form-field">
-                <label className="field-label">Description</label>
-                <textarea
-                  placeholder="Description"
-                  value={form.description}
-                  onChange={(event) => setForm({ ...form, description: event.target.value })}
-                />
-              </div>
-              {productSettings.enableProductCategories ? (
-                <div className="form-field">
-                  <label className="field-label">Category</label>
-                  <select
-                    value={form.categoryId}
-                    onChange={(event) => {
-                      const nextCategory = availableCategories.find(
-                        (category) => category.id === event.target.value
-                      );
-                      setForm({
-                        ...form,
-                        categoryId: event.target.value,
-                        category: nextCategory?.name ?? form.category
-                      });
-                    }}
-                  >
-                    <option value="">Select category</option>
-                    {availableCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name} ({category.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-              {productSettings.enableCompatibleUnits ? (
-                <div className="form-field">
-                  <label className="field-label">Compatible Units</label>
-                  <textarea
-                    placeholder="Compatible Units"
-                    value={form.compatibleUnits ?? ""}
-                    onChange={(event) => setForm({ ...form, compatibleUnits: event.target.value })}
-                  />
-                  <div className="field-help">
-                    For cashier reference only. Does not affect pricing or stock.
+                <div className="inventory-form-section">
+                  <div className="inventory-form-section-title">Product Info</div>
+                  <div className="inventory-form-grid">
+                    <div className="form-field">
+                      <label className="field-label">Product Name</label>
+                      <input
+                        placeholder="Product Name"
+                        value={form.name}
+                        onChange={(event) => setForm({ ...form, name: event.target.value })}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="field-label">SKU</label>
+                      <input value={form.sku} disabled />
+                      <div className="field-help">SKU is locked for existing products.</div>
+                    </div>
+                    {productSettings.enableProductCategories ? (
+                      <div className="form-field inventory-form-grid-span-2">
+                        <label className="field-label">Category</label>
+                        <select
+                          value={form.categoryId}
+                          onChange={(event) => {
+                            const nextCategory = availableCategories.find(
+                              (category) => category.id === event.target.value
+                            );
+                            setForm({
+                              ...form,
+                              categoryId: event.target.value,
+                              category: nextCategory?.name ?? form.category
+                            });
+                          }}
+                        >
+                          <option value="">Select category</option>
+                          {availableCategories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name} ({category.code})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-              ) : null}
-              <div className="row">
-                <div className="form-field">
-                  <label className="field-label">Quantity (Current Stock)</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={form.stockQty}
-                    onChange={(event) =>
-                      setForm({ ...form, stockQty: toNumber(sanitizeDecimalInput(event.target.value)) })
-                    }
-                  />
+
+                <div className="inventory-form-section">
+                  <div className="inventory-form-section-title">Details</div>
+                  <div className="stack">
+                    <div className="form-field">
+                      <label className="field-label">Description</label>
+                      <textarea
+                        placeholder="Description"
+                        value={form.description}
+                        onChange={(event) => setForm({ ...form, description: event.target.value })}
+                      />
+                    </div>
+                    {productSettings.enableCompatibleUnits ? (
+                      <div className="form-field">
+                        <label className="field-label">Compatible Units</label>
+                        <textarea
+                          placeholder="Compatible Units"
+                          value={form.compatibleUnits ?? ""}
+                          onChange={(event) => setForm({ ...form, compatibleUnits: event.target.value })}
+                        />
+                        <div className="field-help">
+                          For cashier reference only. Does not affect pricing or stock.
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="form-field">
-                  <label className="field-label">Price</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={form.sellingPrice}
-                    onChange={(event) =>
-                      setForm({ ...form, sellingPrice: toNumber(sanitizeDecimalInput(event.target.value)) })
-                    }
-                  />
+
+                <div className="inventory-form-section">
+                  <div className="inventory-form-grid">
+                    <div className="form-field">
+                      <label className="field-label">Price</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={form.sellingPrice}
+                        onChange={(event) =>
+                          setForm({ ...form, sellingPrice: toNumber(sanitizeDecimalInput(event.target.value)) })
+                        }
+                      />
+                    </div>
+                    <div className="form-field inventory-status-field">
+                      <label className="field-label">Status</label>
+                      <label className="configuration-check">
+                        <input
+                          type="checkbox"
+                          checked={form.isActive}
+                          onChange={(event) => setForm({ ...form, isActive: event.target.checked })}
+                        />
+                        Active
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="form-field">
-                <label className="field-label">Barcode</label>
-                <input
-                  placeholder="Barcode"
-                  value={form.barcode ?? ""}
-                  onChange={(event) => setForm({ ...form, barcode: event.target.value })}
-                />
-              </div>
-              <label className="configuration-check">
-                <input
-                  type="checkbox"
-                  checked={form.isActive}
-                  onChange={(event) => setForm({ ...form, isActive: event.target.checked })}
-                />
-                Active
-              </label>
-              {productSettings.allowProductPhotoUpload ? (
-                <div className="form-field">
-                  <label className="field-label">Photo Upload / Replace Photo</label>
-                  {editPhotoPreview ? (
-                    <Image
-                      src={editPhotoPreview}
-                      alt="Update item preview"
-                      width={640}
-                      height={240}
-                      className="inventory-photo-preview inventory-photo-preview-edit"
-                    />
-                  ) : (
-                    <div className="inventory-photo-empty-lg">No photo selected</div>
-                  )}
-                  <input type="file" accept="image/*" onChange={onEditPhotoSelected} />
-                  {editPhotoFile ? <SecondaryButton onClick={clearEditPhoto}>Clear Photo</SecondaryButton> : null}
-                </div>
-              ) : null}
-            </div>
             </div>
             <div className="row inventory-modal-footer">
               <SecondaryButton
@@ -1265,7 +1512,7 @@ export function InventoryScreen({
               >
                 Cancel
               </SecondaryButton>
-              <PrimaryButton onClick={updateProduct}>Save Changes</PrimaryButton>
+              <PrimaryButton onClick={updateProduct}>Update Item</PrimaryButton>
             </div>
           </div>
         </div>

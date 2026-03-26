@@ -20,12 +20,12 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
     const result = await signIn("credentials", {
-      email: username,
+      username: username.trim().toLowerCase(),
       password,
       redirect: false
     });
     if (result?.error) {
-      setError("Invalid credentials");
+      setError("Invalid username or password");
       setIsLoading(false);
       return;
     }

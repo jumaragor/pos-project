@@ -9,18 +9,16 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: "credentials",
       credentials: {
-        email: { label: "Email or Username", type: "text" },
+        username: { label: "Username", type: "text" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials.password) {
+        if (!credentials?.username || !credentials.password) {
           return null;
         }
-        const identifier = credentials.email.trim().toLowerCase();
-        const user = await prisma.user.findFirst({
-          where: {
-            OR: [{ email: identifier }, { username: identifier }]
-          }
+        const username = credentials.username.trim().toLowerCase();
+        const user = await prisma.user.findUnique({
+          where: { username }
         });
         if (!user) {
           return null;
@@ -39,8 +37,10 @@ export const authOptions: NextAuthOptions = {
         return {
           id: user.id,
           name: user.name,
+          username: user.username ?? "",
           email: user.email,
-          role: user.role
+          role: user.role,
+          status: user.status
         };
       }
     })
@@ -53,6 +53,8 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.role = user.role;
         token.id = user.id;
+        token.username = user.username;
+        token.status = user.status;
       }
       return token;
     },
@@ -60,6 +62,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
+        session.user.username = token.username as string;
+        session.user.status = token.status as string;
       }
       return session;
     }

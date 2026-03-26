@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PurchaseStatus, SupplierStatus } from "@prisma/client";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { formatCurrency, formatNumber } from "@/lib/format";
 import { sanitizeDecimalInput, toNumber } from "@/lib/numeric-input";
 import { isVoidedPurchaseNote } from "@/lib/purchase-utils";
 import { useToast } from "@/components/toast-provider";
@@ -46,9 +47,11 @@ type PaginationState = {
   totalPages: number;
 };
 type PurchaseStatusFilter = "ALL" | "DRAFT" | "POSTED" | "VOIDED";
+type DateRangeFilter = "ALL" | "TODAY" | "LAST_7_DAYS" | "THIS_MONTH" | "CUSTOM";
 type PurchaseFilters = {
   supplierId: string;
   status: PurchaseStatusFilter;
+  dateRange: DateRangeFilter;
   dateFrom: string;
   dateTo: string;
 };
@@ -102,26 +105,13 @@ function formatDate(isoDate: string) {
   });
 }
 
-function formatQty(value: number) {
-  return Number(value.toFixed(3)).toString();
-}
-
-const currencyFormatter = new Intl.NumberFormat("en-PH", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-});
-
-function formatCurrency(value: number) {
-  return currencyFormatter.format(value);
-}
-
 function asSafeNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatMoney(value: number) {
-  return `PHP ${formatCurrency(value)}`;
+  return formatCurrency(value);
 }
 
 function statusBadgeClass(status: PurchaseStatus, isVoided: boolean) {
@@ -162,6 +152,7 @@ export function PurchasesScreen({
   const [filters, setFilters] = useState<PurchaseFilters>({
     supplierId: "",
     status: "ALL",
+    dateRange: "ALL",
     dateFrom: "",
     dateTo: ""
   });
@@ -275,6 +266,42 @@ export function PurchasesScreen({
     }, 250);
     return () => window.clearTimeout(handle);
   }, [filters.dateFrom, filters.dateTo, filters.status, filters.supplierId, loadPurchases, query]);
+
+  function updateDateRange(nextRange: DateRangeFilter) {
+    const today = todayDateInput();
+    const now = new Date();
+    let nextFrom = "";
+    let nextTo = "";
+
+    if (nextRange === "TODAY") {
+      nextFrom = today;
+      nextTo = today;
+    } else if (nextRange === "LAST_7_DAYS") {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 6);
+      nextFrom = start.toISOString().slice(0, 10);
+      nextTo = today;
+    } else if (nextRange === "THIS_MONTH") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      nextFrom = start.toISOString().slice(0, 10);
+      nextTo = today;
+    }
+
+    setFilters((prev) => ({
+      ...prev,
+      dateRange: nextRange,
+      dateFrom: nextRange === "CUSTOM" ? prev.dateFrom : nextFrom,
+      dateTo: nextRange === "CUSTOM" ? prev.dateTo : nextTo
+    }));
+  }
+
+  const hasActiveFilters =
+    Boolean(query.trim()) ||
+    Boolean(filters.supplierId) ||
+    filters.status !== "ALL" ||
+    filters.dateRange !== "ALL" ||
+    Boolean(filters.dateFrom) ||
+    Boolean(filters.dateTo);
 
   useEffect(() => {
     async function loadSupplierFilters() {
@@ -502,81 +529,95 @@ export function PurchasesScreen({
           </PrimaryButton>
         </div>
 
-        <div className="inventory-filters">
-          <div className="muted">Track all restocking and supplier deliveries.</div>
-          <input
-            className="inventory-search"
-            placeholder="Search purchase no., supplier, reference..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+        <div className="purchases-toolbar">
+          <div className="purchases-search-row">
+            <input
+              className="inventory-search"
+              placeholder="Search purchases..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
 
-        <div className="grid grid-4 purchases-filter-grid">
-          <label className="form-field">
-            <span className="field-label">Supplier</span>
-            <select
-              value={filters.supplierId}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, supplierId: event.target.value }))
-              }
-            >
-              <option value="">All suppliers</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.supplierName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span className="field-label">Status</span>
-            <select
-              value={filters.status}
-              onChange={(event) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  status: event.target.value as PurchaseStatusFilter
-                }))
-              }
-            >
-              <option value="ALL">All statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="POSTED">Posted</option>
-              <option value="VOIDED">Voided</option>
-            </select>
-          </label>
-          <label className="form-field">
-            <span className="field-label">Date From</span>
-            <input
-              type="date"
-              value={filters.dateFrom}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))
-              }
-            />
-          </label>
-          <label className="form-field">
-            <span className="field-label">Date To</span>
-            <input
-              type="date"
-              value={filters.dateTo}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, dateTo: event.target.value }))
-              }
-            />
-          </label>
-        </div>
-        <div className="row purchases-filter-actions">
-          <SecondaryButton
-            type="button"
-            onClick={() => {
-              setQuery("");
-              setFilters({ supplierId: "", status: "ALL", dateFrom: "", dateTo: "" });
-            }}
-          >
-            Clear Filters
-          </SecondaryButton>
+          <div className="purchases-filter-bar">
+            <label className="form-field purchases-filter-field">
+              <select
+                value={filters.supplierId}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, supplierId: event.target.value }))
+                }
+              >
+                <option value="">All suppliers</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.supplierName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field purchases-filter-field">
+              <select
+                value={filters.status}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    status: event.target.value as PurchaseStatusFilter
+                  }))
+                }
+              >
+                <option value="ALL">All statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="POSTED">Posted</option>
+                <option value="VOIDED">Voided</option>
+              </select>
+            </label>
+            <label className="form-field purchases-filter-field">
+              <select value={filters.dateRange} onChange={(event) => updateDateRange(event.target.value as DateRangeFilter)}>
+                <option value="ALL">Date Range</option>
+                <option value="TODAY">Today</option>
+                <option value="LAST_7_DAYS">Last 7 days</option>
+                <option value="THIS_MONTH">This Month</option>
+                <option value="CUSTOM">Custom range</option>
+              </select>
+            </label>
+            {filters.dateRange === "CUSTOM" ? (
+              <div className="purchases-custom-range">
+                <input
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(event) =>
+                    setFilters((prev) => ({ ...prev, dateFrom: event.target.value }))
+                  }
+                />
+                <span className="muted">to</span>
+                <input
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(event) =>
+                    setFilters((prev) => ({ ...prev, dateTo: event.target.value }))
+                  }
+                />
+              </div>
+            ) : null}
+            {hasActiveFilters ? (
+              <SecondaryButton
+                type="button"
+                className="purchases-clear-btn"
+                onClick={() => {
+                  setQuery("");
+                  setFilters({
+                    supplierId: "",
+                    status: "ALL",
+                    dateRange: "ALL",
+                    dateFrom: "",
+                    dateTo: ""
+                  });
+                }}
+              >
+                Clear
+              </SecondaryButton>
+            ) : null}
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -607,8 +648,8 @@ export function PurchasesScreen({
                     <td>{purchase.purchaseNumber}</td>
                     <td>{formatDate(purchase.purchaseDate)}</td>
                     <td>{purchase.supplierName || "-"}</td>
-                    <td>{formatQty(purchase.totalItems)}</td>
-                    <td>PHP {purchase.totalCost.toFixed(2)}</td>
+                    <td>{formatNumber(purchase.totalItems, { maximumFractionDigits: 3 })}</td>
+                    <td>{formatCurrency(purchase.totalCost)}</td>
                     <td>
                       <span className={statusBadgeClass(purchase.status, isVoided)}>
                         {displayPurchaseStatus(purchase.status, purchase.notes)}
@@ -860,7 +901,7 @@ export function PurchasesScreen({
               <div className="card purchases-summary">
                 <div>
                   <span>Total Items</span>
-                  <strong>{formatQty(summary.totalItems)}</strong>
+                  <strong>{formatNumber(summary.totalItems)}</strong>
                 </div>
                 <div>
                   <span>Subtotal</span>

@@ -1,9 +1,8 @@
-import { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { PaymentMethod } from "@prisma/client";
-import { createSale } from "@/lib/pos-service";
-import { badRequest, created, serverError } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
+import { badRequest, created, serverError } from "@/lib/http";
+import { saveDraftSale } from "@/lib/pos-service";
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,18 +17,18 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(body.items) || body.items.length === 0) {
       return badRequest("items are required");
     }
-    const transaction = await createSale({
+
+    const transaction = await saveDraftSale({
       userId: user.id,
       customerId: body.customerId,
-      paymentMethod: body.paymentMethod as PaymentMethod,
-      cashAmount: body.cashAmount,
-      qrAmount: body.qrAmount,
+      paymentMethod: (body.paymentMethod as PaymentMethod) ?? PaymentMethod.CASH,
       draftId: body.draftId,
       orderDiscount: body.orderDiscount,
       items: body.items
     });
+
     return created(transaction);
   } catch (error) {
-    return serverError(error instanceof Error ? error.message : "Failed to create transaction");
+    return serverError(error instanceof Error ? error.message : "Failed to hold order");
   }
 }

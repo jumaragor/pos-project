@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
     }),
     prisma.transactionItem.groupBy({
       by: ["productId"],
+      where: {
+        transaction: { createdAt: { gte: from, lte: to }, status: TransactionStatus.COMPLETED }
+      },
       _sum: { qty: true, subtotal: true },
       orderBy: { _sum: { qty: "desc" } },
       take: 10

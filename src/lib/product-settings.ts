@@ -4,18 +4,14 @@ export type ProductSettings = {
   enableProductCategories: boolean;
   enableCompatibleUnits: boolean;
   allowProductPhotoUpload: boolean;
-  requireSKU: boolean;
   autoGenerateSKU: boolean;
-  skuGenerationMode: "MANUAL" | "GLOBAL" | "CATEGORY_BASED";
 };
 
 export const defaultProductSettings: ProductSettings = {
   enableProductCategories: true,
   enableCompatibleUnits: true,
   allowProductPhotoUpload: true,
-  requireSKU: true,
-  autoGenerateSKU: false,
-  skuGenerationMode: "GLOBAL"
+  autoGenerateSKU: false
 };
 const SETTINGS_TTL_MS = 30_000;
 let productSettingsCache:
@@ -30,13 +26,6 @@ function isTruthySetting(value: string | null | undefined, fallback: boolean) {
   return value === "true";
 }
 
-function asSkuMode(value: string | null | undefined, fallback: ProductSettings["skuGenerationMode"]) {
-  if (value === "MANUAL" || value === "GLOBAL" || value === "CATEGORY_BASED") {
-    return value;
-  }
-  return fallback;
-}
-
 export async function getProductSettings(): Promise<ProductSettings> {
   if (productSettingsCache && productSettingsCache.expiresAt > Date.now()) {
     return productSettingsCache.value;
@@ -48,9 +37,7 @@ export async function getProductSettings(): Promise<ProductSettings> {
           "enableProductCategories",
           "enableCompatibleUnits",
           "allowProductPhotoUpload",
-          "requireSKU",
-          "autoGenerateSKU",
-          "skuGenerationMode"
+          "autoGenerateSKU"
         ]
       }
     }
@@ -71,14 +58,9 @@ export async function getProductSettings(): Promise<ProductSettings> {
       valueByKey.get("allowProductPhotoUpload"),
       defaultProductSettings.allowProductPhotoUpload
     ),
-    requireSKU: isTruthySetting(valueByKey.get("requireSKU"), defaultProductSettings.requireSKU),
     autoGenerateSKU: isTruthySetting(
       valueByKey.get("autoGenerateSKU"),
       defaultProductSettings.autoGenerateSKU
-    ),
-    skuGenerationMode: asSkuMode(
-      valueByKey.get("skuGenerationMode"),
-      defaultProductSettings.skuGenerationMode
     )
   };
   productSettingsCache = {
@@ -110,17 +92,18 @@ export async function generateUniqueSku(prefix = "PRD") {
 
 export async function generateProductSku(categoryId?: string | null) {
   const settings = await getProductSettings();
-  if (!settings.autoGenerateSKU || settings.skuGenerationMode === "MANUAL") {
+  if (!settings.autoGenerateSKU) {
     return "";
   }
-  if (settings.skuGenerationMode === "CATEGORY_BASED" && categoryId) {
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-      select: { skuPrefix: true }
-    });
-    if (category?.skuPrefix) {
-      return generateUniqueSku(category.skuPrefix);
-    }
+  if (!categoryId) {
+    throw new Error("Category is required for auto-generated SKU.");
   }
-  return generateUniqueSku();
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { skuPrefix: true }
+  });
+  if (!category?.skuPrefix) {
+    throw new Error("Selected category does not have a configured SKU prefix.");
+  }
+  return generateUniqueSku(category.skuPrefix);
 }

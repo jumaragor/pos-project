@@ -3,7 +3,14 @@ import { ok } from "@/lib/http";
 
 export async function GET() {
   const data = await prisma.transaction.findMany({
-    include: { user: { select: { name: true } }, customer: { select: { name: true } } },
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      totalAmount: true,
+      createdAt: true,
+      customer: { select: { name: true } }
+    },
     orderBy: { createdAt: "desc" },
     take: 50
   });

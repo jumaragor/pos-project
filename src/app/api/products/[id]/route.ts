@@ -12,6 +12,12 @@ import { TransactionStatus } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
 
+function normalizeOptionalText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const actor = await getAuthUser();
@@ -45,16 +51,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return badRequest("Inactive categories cannot be assigned to products");
     }
     const trimmedSku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
-    if (!trimmedSku && settings.requireSKU && !settings.autoGenerateSKU && !existingProduct.sku) {
+    if (!settings.autoGenerateSKU && !trimmedSku && !existingProduct.sku) {
       return badRequest("SKU is required");
     }
-    const sku =
-      trimmedSku ||
-      existingProduct.sku ||
-      (settings.autoGenerateSKU || !settings.requireSKU ? await generateProductSku(categoryId) : "");
+    const sku = settings.autoGenerateSKU
+      ? trimmedSku || existingProduct.sku || (await generateProductSku(categoryId))
+      : trimmedSku || existingProduct.sku;
     if (!sku) {
       return badRequest("SKU is required");
     }
+    const normalizedBarcode = normalizeOptionalText(body.barcode);
     const product = await prisma.product.update({
       where: { id },
       data: {
@@ -64,7 +70,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         compatibleUnits: settings.enableCompatibleUnits
           ? body.compatibleUnits
           : existingProduct.compatibleUnits,
-        barcode: body.barcode,
+        barcode: normalizedBarcode,
         photoUrl: body.photoUrl,
         categoryId: settings.enableProductCategories ? categoryId : existingProduct.categoryId,
         category: settings.enableProductCategories ? category?.name ?? existingProduct.category : existingProduct.category,
@@ -90,6 +96,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     return ok(product);
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(", ") : String(error.meta?.target ?? "");
+      if (target.includes("barcode")) {
+        return badRequest("Barcode already exists. Please use a unique barcode or leave it blank.");
+      }
+      if (target.includes("sku")) {
+        return badRequest("SKU already exists. Please use a unique SKU.");
+      }
+    }
+    if (error instanceof Error && /Category is required|configured SKU prefix/i.test(error.message)) {
+      return badRequest(error.message);
+    }
     return serverError(error instanceof Error ? error.message : "Failed to update product");
   }
 }

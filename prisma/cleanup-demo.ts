@@ -2,6 +2,10 @@ import bcrypt from "bcryptjs";
 import { PrismaClient, Role, UserStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
+const resetPassword = "MicroBiz123!";
+const resetEmail = "owner@microbiz.local";
+const resetUsername = "owner";
+const resetName = "Owner Demo";
 
 async function ensureOwnerAccount() {
   const owner = await prisma.user.findFirst({
@@ -13,12 +17,12 @@ async function ensureOwnerAccount() {
     return owner;
   }
 
-  const passwordHash = await bcrypt.hash("Owner123!", 10);
+  const passwordHash = await bcrypt.hash(resetPassword, 10);
   return prisma.user.create({
     data: {
-      name: "Owner Demo",
-      email: "owner@microbiz.local",
-      username: "owner",
+      name: resetName,
+      email: resetEmail,
+      username: resetUsername,
       passwordHash,
       role: Role.OWNER
     }
@@ -28,27 +32,25 @@ async function ensureOwnerAccount() {
 async function main() {
   const owner = await ensureOwnerAccount();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.syncOperation.deleteMany();
+  await prisma.syncOperation.deleteMany();
 
-    await tx.stockMovement.deleteMany();
-    await tx.transactionItem.deleteMany();
-    await tx.transaction.deleteMany();
+  await prisma.stockMovement.deleteMany();
+  await prisma.transactionItem.deleteMany();
+  await prisma.transaction.deleteMany();
 
-    await tx.purchaseItem.deleteMany();
-    await tx.purchase.deleteMany();
+  await prisma.purchaseItem.deleteMany();
+  await prisma.purchase.deleteMany();
 
-    await tx.unitConversionRule.deleteMany();
-    await tx.product.deleteMany();
+  await prisma.unitConversionRule.deleteMany();
+  await prisma.product.deleteMany();
 
-    await tx.supplier.deleteMany();
-    await tx.customer.deleteMany();
+  await prisma.supplier.deleteMany();
+  await prisma.customer.deleteMany();
 
-    await tx.auditLog.deleteMany({
-      where: {
-        OR: [{ entityType: "Transaction" }, { entityType: "Purchase" }, { entityType: "Product" }]
-      }
-    });
+  await prisma.auditLog.deleteMany({
+    where: {
+      OR: [{ entityType: "Transaction" }, { entityType: "Purchase" }, { entityType: "Product" }]
+    }
   });
 
   await prisma.user.deleteMany({
@@ -61,12 +63,18 @@ async function main() {
   await prisma.user.update({
     where: { id: owner.id },
     data: {
+      name: resetName,
+      email: resetEmail,
+      username: resetUsername,
+      passwordHash: await bcrypt.hash(resetPassword, 10),
       status: UserStatus.ACTIVE
     }
   });
 
   console.log("Demo data cleanup completed.");
-  console.log(`Retained admin account: ${owner.email}`);
+  console.log(`Retained admin account: ${resetEmail}`);
+  console.log(`Username: ${resetUsername}`);
+  console.log(`Password: ${resetPassword}`);
 }
 
 main()

@@ -1,3 +1,4 @@
+import { TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { CustomersScreen } from "@/components/customers-screen";
 import { buildPagination, DEFAULT_PAGE_SIZE } from "@/lib/pagination";
@@ -14,7 +15,7 @@ export default async function CustomersPage() {
     prisma.customer.count(),
     prisma.transaction.groupBy({
       by: ["customerId"],
-      where: { customerId: { not: null } },
+      where: { customerId: { not: null }, status: TransactionStatus.COMPLETED },
       _sum: { totalAmount: true },
       _count: { _all: true },
       _max: { createdAt: true }

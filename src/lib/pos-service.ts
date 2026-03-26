@@ -11,6 +11,13 @@ import { assertPermission } from "@/lib/rbac";
 import { computeCartTotals, DiscountInput } from "@/lib/pricing";
 import { getInventorySettings } from "@/lib/inventory-settings";
 
+type SaleItemInput = {
+  productId: string;
+  qty: number;
+  price?: number;
+  itemDiscount?: DiscountInput;
+};
+
 type SaleInput = {
   userId: string;
   customerId?: string;
@@ -18,88 +25,274 @@ type SaleInput = {
   cashAmount?: number;
   qrAmount?: number;
   orderDiscount?: DiscountInput;
-  items: Array<{
-    productId: string;
-    qty: number;
-    itemDiscount?: DiscountInput;
-  }>;
+  draftId?: string;
+  items: SaleItemInput[];
 };
 
-export async function createSale(input: SaleInput) {
-  const inventorySettings = await getInventorySettings();
-  return prisma.$transaction(async (tx) => {
-    const products = await tx.product.findMany({
-      where: { id: { in: input.items.map((item) => item.productId) } }
-    });
+type DraftSaleInput = {
+  userId: string;
+  customerId?: string;
+  paymentMethod?: PaymentMethod;
+  draftId?: string;
+  orderDiscount?: DiscountInput;
+  items: SaleItemInput[];
+};
 
-    if (products.length !== input.items.length) {
+type PreparedItem = {
+  productId: string;
+  qty: number;
+  price: number;
+  costAtSale: Prisma.Decimal;
+  subtotal: number;
+};
+
+async function loadProductsForItems(
+  tx: Prisma.TransactionClient,
+  items: SaleItemInput[]
+) {
+  const products = await tx.product.findMany({
+    where: { id: { in: items.map((item) => item.productId) } }
+  });
+
+  if (products.length !== items.length) {
+    throw new Error("Some products were not found");
+  }
+
+  return products;
+}
+
+function prepareSaleItems(products: Awaited<ReturnType<typeof loadProductsForItems>>, items: SaleItemInput[]) {
+  return items.map((item) => {
+    const product = products.find((entry) => entry.id === item.productId);
+    if (!product) {
       throw new Error("Some products were not found");
     }
+    const price = Number.isFinite(item.price) ? Number(item.price) : Number(product.sellingPrice);
+    const qty = Math.max(0, Number(item.qty));
+    return {
+      productId: product.id,
+      qty,
+      price,
+      costAtSale: product.costPrice,
+      subtotal: qty * price
+    } satisfies PreparedItem;
+  });
+}
 
-    const pricingLines = input.items.map((item) => {
-      const product = products.find((p) => p.id === item.productId)!;
-      return {
-        qty: item.qty,
-        price: Number(product.sellingPrice),
-        itemDiscount: item.itemDiscount
-      };
+async function createOrUpdateDraftTransaction(
+  tx: Prisma.TransactionClient,
+  input: DraftSaleInput
+) {
+  const products = await loadProductsForItems(tx, input.items);
+  const preparedItems = prepareSaleItems(products, input.items);
+  const totals = computeCartTotals(
+    input.items.map((item, index) => ({
+      qty: preparedItems[index].qty,
+      price: preparedItems[index].price,
+      itemDiscount: item.itemDiscount
+    })),
+    input.orderDiscount
+  );
+
+  let transaction;
+  if (input.draftId) {
+    const existingDraft = await tx.transaction.findUnique({
+      where: { id: input.draftId },
+      include: { items: true }
     });
-    const totals = computeCartTotals(pricingLines, input.orderDiscount);
-
-    for (const item of input.items) {
-      const product = products.find((p) => p.id === item.productId)!;
-      const nextStock = Number(product.stockQty) - item.qty;
-      if (!inventorySettings.allowNegativeStock && nextStock < 0) {
-        throw new Error("Insufficient stock");
-      }
+    if (!existingDraft || existingDraft.status !== TransactionStatus.DRAFT) {
+      throw new Error("Held order not found");
     }
-
-    const count = await tx.transaction.count();
-    const number = `TX-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
-    const transaction = await tx.transaction.create({
+    transaction = await tx.transaction.update({
+      where: { id: input.draftId },
+      data: {
+        customerId: input.customerId,
+        userId: input.userId,
+        totalAmount: totals.total,
+        discountTotal: totals.totalDiscount,
+        paymentMethod: input.paymentMethod ?? existingDraft.paymentMethod,
+        cashAmount: null,
+        qrAmount: null,
+        status: TransactionStatus.DRAFT
+      }
+    });
+    await tx.transactionItem.deleteMany({ where: { transactionId: existingDraft.id } });
+  } else {
+    const count = await tx.transaction.count({ where: { status: TransactionStatus.DRAFT } });
+    const number = `HLD-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
+    transaction = await tx.transaction.create({
       data: {
         number,
         customerId: input.customerId,
         userId: input.userId,
         totalAmount: totals.total,
         discountTotal: totals.totalDiscount,
-        paymentMethod: input.paymentMethod,
-        cashAmount: input.cashAmount,
-        qrAmount: input.qrAmount,
-        status: TransactionStatus.COMPLETED
+        paymentMethod: input.paymentMethod ?? PaymentMethod.CASH,
+        status: TransactionStatus.DRAFT
       }
     });
+  }
 
-    for (const item of input.items) {
-      const product = products.find((p) => p.id === item.productId)!;
-      const subtotal = item.qty * Number(product.sellingPrice);
-      await tx.transactionItem.create({
-        data: {
-          transactionId: transaction.id,
-          productId: product.id,
-          qty: item.qty,
-          price: product.sellingPrice,
-          costAtSale: product.costPrice,
-          subtotal
-        }
-      });
-      await tx.product.update({
-        where: { id: product.id },
-        data: { stockQty: { decrement: item.qty } }
-      });
-      await tx.stockMovement.create({
-        data: {
-          type: StockMovementType.SALE,
-          productId: product.id,
-          qtyDelta: -item.qty,
-          reason: "POS sale",
-          refId: transaction.id,
-          userId: input.userId
-        }
-      });
-    }
-    return transaction;
+  for (const item of preparedItems) {
+    await tx.transactionItem.create({
+      data: {
+        transactionId: transaction.id,
+        productId: item.productId,
+        qty: item.qty,
+        price: item.price,
+        costAtSale: item.costAtSale,
+        subtotal: item.subtotal
+      }
+    });
+  }
+
+  return transaction;
+}
+
+export async function saveDraftSale(input: DraftSaleInput) {
+  return prisma.$transaction(async (tx) => createOrUpdateDraftTransaction(tx, input), {
+    maxWait: 10_000,
+    timeout: 20_000
   });
+}
+
+export async function createSale(input: SaleInput) {
+  const inventorySettings = await getInventorySettings();
+  return prisma.$transaction(
+    async (tx) => {
+      const products = await loadProductsForItems(tx, input.items);
+      const preparedItems = prepareSaleItems(products, input.items);
+      const productsById = new Map(products.map((product) => [product.id, product]));
+      const totals = computeCartTotals(
+        input.items.map((item, index) => ({
+          qty: preparedItems[index].qty,
+          price: preparedItems[index].price,
+          itemDiscount: item.itemDiscount
+        })),
+        input.orderDiscount
+      );
+
+      for (const item of preparedItems) {
+        const product = productsById.get(item.productId);
+        if (!product) {
+          throw new Error("Some products were not found");
+        }
+        const nextStock = Number(product.stockQty) - item.qty;
+        if (!inventorySettings.allowNegativeStock && nextStock < 0) {
+          throw new Error("Insufficient stock");
+        }
+      }
+
+      let transaction;
+      if (input.draftId) {
+        const existingDraft = await tx.transaction.findUnique({
+          where: { id: input.draftId },
+          include: { items: true }
+        });
+        if (!existingDraft || existingDraft.status !== TransactionStatus.DRAFT) {
+          throw new Error("Held order not found");
+        }
+        await tx.transactionItem.deleteMany({ where: { transactionId: existingDraft.id } });
+        transaction = await tx.transaction.update({
+          where: { id: existingDraft.id },
+          data: {
+            customerId: input.customerId,
+            userId: input.userId,
+            totalAmount: totals.total,
+            discountTotal: totals.totalDiscount,
+            paymentMethod: input.paymentMethod,
+            cashAmount: input.cashAmount,
+            qrAmount: input.qrAmount,
+            status: TransactionStatus.COMPLETED
+          }
+        });
+      } else {
+        const count = await tx.transaction.count();
+        const number = `TX-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
+        transaction = await tx.transaction.create({
+          data: {
+            number,
+            customerId: input.customerId,
+            userId: input.userId,
+            totalAmount: totals.total,
+            discountTotal: totals.totalDiscount,
+            paymentMethod: input.paymentMethod,
+            cashAmount: input.cashAmount,
+            qrAmount: input.qrAmount,
+            status: TransactionStatus.COMPLETED
+          }
+        });
+      }
+
+      for (const item of preparedItems) {
+        await tx.transactionItem.create({
+          data: {
+            transactionId: transaction.id,
+            productId: item.productId,
+            qty: item.qty,
+            price: item.price,
+            costAtSale: item.costAtSale,
+            subtotal: item.subtotal
+          }
+        });
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { stockQty: { decrement: item.qty } }
+        });
+        await tx.stockMovement.create({
+          data: {
+            type: StockMovementType.SALE,
+            productId: item.productId,
+            qtyDelta: -item.qty,
+            reason: input.draftId ? "Completed held POS sale" : "POS sale",
+            refId: transaction.id,
+            userId: input.userId
+          }
+        });
+      }
+
+      return transaction;
+    },
+    {
+      maxWait: 10_000,
+      timeout: 20_000
+    }
+  );
+}
+
+export async function getHeldTransaction(transactionId: string) {
+  const transaction = await prisma.transaction.findUnique({
+    where: { id: transactionId },
+    include: {
+      customer: { select: { id: true, name: true } },
+      items: {
+        include: {
+          product: { select: { id: true, name: true, isActive: true } }
+        }
+      }
+    }
+  });
+
+  if (!transaction || transaction.status !== TransactionStatus.DRAFT) {
+    throw new Error("Held order not found");
+  }
+
+  return {
+    id: transaction.id,
+    number: transaction.number,
+    customerId: transaction.customerId,
+    customerName: transaction.customer?.name ?? null,
+    status: transaction.status,
+    totalAmount: Number(transaction.totalAmount),
+    createdAt: transaction.createdAt.toISOString(),
+    items: transaction.items.map((item) => ({
+      productId: item.productId,
+      name: item.product.name,
+      qty: Number(item.qty),
+      price: Number(item.price),
+      isProductActive: item.product.isActive
+    }))
+  };
 }
 
 export async function voidTransaction(transactionId: string, actorId: string, actorRole: Role) {

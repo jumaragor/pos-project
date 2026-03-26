@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { LogoutIcon, MenuIcon } from "@/components/ui/app-icons";
+import { LogoutIcon, MenuIcon, UsersIcon, ChevronRightIcon } from "@/components/ui/app-icons";
 import { sectionIcons } from "@/components/ui/app-icons";
 
 const sections: Record<string, { label: string; icon: keyof typeof sectionIcons }> = {
@@ -25,12 +27,56 @@ function pageMeta(pathname: string) {
 }
 
 export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
+  const router = useRouter();
   const pathname = usePathname();
   const { data } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const meta = pageMeta(pathname);
   const Icon = sectionIcons[meta.icon];
-  const displayName = data?.user?.name ?? "User";
-  const displayRole = data?.user?.role ?? "USER";
+  const displayName = currentUserName ?? data?.user?.name ?? "User";
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadCurrentUser() {
+      const response = await fetch("/api/users/me");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { name?: string | null };
+      if (!mounted) return;
+      setCurrentUserName(payload.name?.trim() || null);
+    }
+
+    void loadCurrentUser();
+    const handleUserUpdated = () => {
+      void loadCurrentUser();
+    };
+    window.addEventListener("microbiz:user-updated", handleUserUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener("microbiz:user-updated", handleUserUpdated);
+    };
+  }, []);
 
   return (
     <header className="header">
@@ -52,20 +98,46 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
         </h1>
       </div>
       <div className="header-actions">
-        <div className="header-user">
-          <span className="header-user-name">{displayName}</span>
-          <span className="badge">{displayRole}</span>
-        </div>
         <div className="header-meta">{new Date().toLocaleDateString("en-PH")}</div>
-        <button
-          type="button"
-          className="header-logout-btn"
-          title="Logout"
-          aria-label="Logout"
-          onClick={() => signOut({ callbackUrl: "/login" })}
-        >
-          <LogoutIcon className="header-logout-icon" />
-        </button>
+        <div className="header-user-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="header-user-trigger"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+          >
+            <span className="header-user-avatar">
+              <UsersIcon className="header-user-avatar-icon" />
+            </span>
+            <span className="header-user">
+              <span className="header-user-name">{displayName}</span>
+            </span>
+            <ChevronRightIcon className={menuOpen ? "header-user-chevron open" : "header-user-chevron"} />
+          </button>
+          {menuOpen ? (
+            <div className="header-user-dropdown" role="menu">
+              <button
+                type="button"
+                className="header-user-dropdown-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  router.push("/configuration");
+                }}
+              >
+                Settings
+              </button>
+              <button
+                type="button"
+                className="header-user-dropdown-item header-user-dropdown-item-danger"
+                onClick={() => signOut({ callbackUrl: "/login" })}
+              >
+                <LogoutIcon className="header-user-dropdown-icon" />
+                <span>Logout</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );

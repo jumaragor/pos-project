@@ -1,35 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PaymentMethod } from "@prisma/client";
+import { PaymentMethod, TransactionStatus } from "@prisma/client";
 import { db } from "@/lib/offline-db";
-import { applyDiscount } from "@/lib/pricing";
 import { ProductGrid } from "@/components/pos/product-grid";
 import { CategoryTabs } from "@/components/pos/category-tabs";
 import { CartPanel } from "@/components/pos/cart-panel";
-import { PaymentModal } from "@/components/pos/payment-modal";
-import { CartLine, CustomerLite, HoldOrder, ProductLite } from "@/components/pos/types";
+import { CheckoutModal } from "@/components/pos/checkout-modal";
+import { ReceiptPrint } from "@/components/pos/receipt-print";
+import { CartLine, CustomerLite, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
+import { formatCurrency } from "@/lib/format";
+import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
 
-type CompletedSale = {
-  txNumber?: string;
-  synced: boolean;
-  createdAt: string;
-  customerName?: string;
-  paymentMethod: PaymentMethod;
-  cashAmount?: number;
-  qrAmount?: number;
-  subtotal: number;
-  discount: number;
-  total: number;
-  items: Array<{
-    name: string;
-    qty: number;
-    lineTotal: number;
-  }>;
-};
+type ReceiptRecord = ReceiptSource;
 
 type TransactionRow = {
   id: string;
@@ -37,6 +23,26 @@ type TransactionRow = {
   status: string;
   totalAmount: string;
   createdAt?: string;
+  customer?: { name: string } | null;
+};
+
+const defaultReceiptSettings: ReceiptSettings = {
+  businessName: "",
+  storeName: "MicroBiz POS",
+  storeAddress: "",
+  storeContactNumber: "",
+  storeEmailAddress: "",
+  storeLogoUrl: "",
+  receiptFooterMessage: "Thank you for shopping!",
+  tin: "",
+  permitNo: "",
+  showCashierName: true,
+  showCustomerName: true,
+  showChangeAmount: true,
+  enableTax: true,
+  defaultTaxRate: 12,
+  taxLabel: "VAT",
+  taxInclusivePricing: false
 };
 
 export function PosWorkspace({
@@ -51,21 +57,21 @@ export function PosWorkspace({
   const [view, setView] = useState<"pos" | "transactions">("pos");
   const [enableProductCategories, setEnableProductCategories] = useState(true);
   const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(true);
+  const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(true);
   const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
   const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
-  const [cashAmount, setCashAmount] = useState<number>(0);
-  const [qrAmount, setQrAmount] = useState<number>(0);
-  const [amountPaid, setAmountPaid] = useState<number>(0);
-  const [orderDiscountType, setOrderDiscountType] = useState<"PERCENT" | "FIXED">("FIXED");
-  const [orderDiscountValue, setOrderDiscountValue] = useState<number>(0);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [activeDraftNumber, setActiveDraftNumber] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [holds, setHolds] = useState<HoldOrder[]>([]);
-  const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null);
-  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [completedSale, setCompletedSale] = useState<ReceiptRecord | null>(null);
+  const [receiptReady, setReceiptReady] = useState<ReceiptRecord | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [isConfirmingCheckout, setIsConfirmingCheckout] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<TransactionRow[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -91,17 +97,13 @@ export function PosWorkspace({
   const compactCategoryFilters = visibleCategories.length <= 4;
 
   const subtotal = cart.reduce((acc, line) => acc + line.qty * line.price, 0);
-  const lineNet = cart.reduce((acc, line) => {
-    const base = line.qty * line.price;
-    const discount = applyDiscount(base, undefined);
-    return acc + discount.final;
-  }, 0);
-  const orderDiscount = applyDiscount(lineNet, {
-    type: orderDiscountType,
-    value: orderDiscountValue
-  });
-  const total = orderDiscount.final;
-  const discount = orderDiscount.amount;
+  const total = subtotal;
+  const discount = 0;
+  const totalItems = cart.reduce((acc, line) => acc + line.qty, 0);
+  const printableReceipt = useMemo(
+    () => (completedSale ? buildReceiptData(completedSale, receiptSettings) : null),
+    [completedSale, receiptSettings]
+  );
 
   async function loadTransactions() {
     const response = await fetch("/api/pos/transactions");
@@ -123,8 +125,28 @@ export function PosWorkspace({
       if (!mounted) return;
       setEnableProductCategories(payload.enableProductCategories !== false);
       setEnableCompatibleUnits(payload.enableCompatibleUnits !== false);
+      setAllowProductPhotoUpload(payload.allowProductPhotoUpload !== false);
       setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
+      setAutoPrintReceipt(payload.autoPrintReceipt === true);
+      setReceiptSettings({
+        businessName: String(payload.businessName ?? ""),
+        storeName: String(payload.storeName ?? "MicroBiz POS"),
+        storeAddress: String(payload.storeAddress ?? ""),
+        storeContactNumber: String(payload.storeContactNumber ?? ""),
+        storeEmailAddress: String(payload.storeEmailAddress ?? ""),
+        storeLogoUrl: String(payload.storeLogoUrl ?? ""),
+        receiptFooterMessage: String(payload.receiptFooterMessage ?? "Thank you for shopping!"),
+        tin: String(payload.tin ?? ""),
+        permitNo: String(payload.permitNo ?? ""),
+        showCashierName: payload.showCashierName !== false,
+        showCustomerName: payload.showCustomerName !== false,
+        showChangeAmount: payload.showChangeAmount !== false,
+        enableTax: payload.enableTax !== false,
+        defaultTaxRate: Number(payload.defaultTaxRate ?? 12),
+        taxLabel: String(payload.taxLabel ?? "VAT"),
+        taxInclusivePricing: payload.taxInclusivePricing === true
+      });
     }
 
     void loadProductSettings();
@@ -150,13 +172,6 @@ export function PosWorkspace({
     }
   }, [view]);
 
-  useEffect(() => {
-    if (!paymentOpen) return;
-    setAmountPaid(total);
-    setCashAmount(total);
-    setQrAmount(0);
-  }, [paymentOpen, total]);
-
   function addProduct(product: ProductLite) {
     setCart((prev) => {
       const existing = prev.find((line) => line.productId === product.id);
@@ -172,146 +187,203 @@ export function PosWorkspace({
   function resetOrderState() {
     setCart([]);
     setCustomerId("");
-    setOrderDiscountType("FIXED");
-    setOrderDiscountValue(0);
-    setPaymentMethod(PaymentMethod.CASH);
-    setCashAmount(0);
-    setQrAmount(0);
-    setAmountPaid(0);
+    setActiveDraftId(null);
+    setActiveDraftNumber(null);
+    setCheckoutOpen(false);
+    setIsConfirmingCheckout(false);
   }
 
   function onNewSale() {
     resetOrderState();
+    setReceiptReady(null);
     setView("pos");
     inputRef.current?.focus();
   }
 
-  function holdOrder() {
-    if (!cart.length) return;
-    const hold: HoldOrder = {
-      id: crypto.randomUUID(),
-      label: `Hold ${new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}`,
-      createdAt: new Date().toISOString(),
-      cart,
-      customerId,
-      orderDiscountType,
-      orderDiscountValue,
-      paymentMethod
-    };
-    setHolds((prev) => [hold, ...prev]);
-    resetOrderState();
-  }
-
-  function resumeHold(holdId: string) {
-    const target = holds.find((h) => h.id === holdId);
-    if (!target) return;
-    setCart(target.cart);
-    setCustomerId(target.customerId);
-    setOrderDiscountType(target.orderDiscountType);
-    setOrderDiscountValue(target.orderDiscountValue);
-    setPaymentMethod(target.paymentMethod);
-    setHolds((prev) => prev.filter((h) => h.id !== holdId));
-    setView("pos");
-  }
-
-  function buildSaleSnapshot(txNumber?: string, synced = true): CompletedSale {
+  function buildSaleSnapshot(amountPaid: number, txNumber?: string, synced = true): ReceiptRecord {
     const customer = customers.find((row) => row.id === customerId);
-    const splitCash = paymentMethod === "SPLIT" ? cashAmount : paymentMethod === "CASH" ? amountPaid : 0;
-    const splitQr = paymentMethod === "SPLIT" ? qrAmount : paymentMethod === "QR" ? amountPaid : 0;
     return {
       txNumber,
       synced,
       createdAt: new Date().toISOString(),
       customerName: customer?.name,
-      paymentMethod,
-      cashAmount: splitCash || undefined,
-      qrAmount: splitQr || undefined,
+      cashierName: session?.user.name ?? session?.user.username ?? undefined,
+      paymentMethod: PaymentMethod.CASH,
+      cashAmount: amountPaid,
+      qrAmount: 0,
       subtotal,
       discount,
+      discountTotal: discount,
+      taxAmount: 0,
       total,
       items: cart.map((line) => ({
         name: line.name,
         qty: line.qty,
+        unitPrice: line.price,
         lineTotal: line.qty * line.price
       }))
     };
   }
 
-  function printSaleTransaction() {
+  function printSaleTransaction(sale: ReceiptRecord | null = receiptReady ?? completedSale) {
+    if (!sale) return;
+    setCompletedSale(sale);
     window.print();
     success("Transaction printed successfully");
   }
 
-  async function completeSale() {
+  async function loadReceiptRecord(transactionId: string) {
+    const response = await fetch(`/api/pos/transactions/${transactionId}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error ?? "Failed to load receipt");
+    }
+    const receipt: ReceiptRecord = {
+      txNumber: data.number,
+      synced: true,
+      createdAt: data.createdAt,
+      customerName: data.customerName ?? undefined,
+      cashierName: data.cashierName ?? data.cashierUsername ?? undefined,
+      paymentMethod: data.paymentMethod,
+      cashAmount: data.cashAmount ?? undefined,
+      qrAmount: data.qrAmount ?? undefined,
+      subtotal: Number(data.totalAmount) - Number(data.discountTotal ?? 0),
+      discount: Number(data.discountTotal ?? 0),
+      discountTotal: Number(data.discountTotal ?? 0),
+      taxAmount: Number(data.taxAmount ?? 0),
+      total: Number(data.totalAmount),
+      items: (data.items ?? []).map((item: { name: string; qty: number; price?: number; lineTotal: number }) => ({
+        name: item.name,
+        qty: Number(item.qty),
+        unitPrice: Number(item.price ?? 0),
+        lineTotal: Number(item.lineTotal)
+      }))
+    };
+    setCompletedSale(receipt);
+    setReceiptReady(receipt);
+    return receipt;
+  }
+
+  async function completeSale(amountPaid: number) {
     if (!cart.length) return;
-    const paidAmount = paymentMethod === "SPLIT" ? cashAmount + qrAmount : amountPaid;
-    if (paidAmount < total) {
-      alert("Amount paid is less than total.");
+    if (amountPaid < total) {
+      alert("Insufficient amount");
       return;
     }
+
+    setIsConfirmingCheckout(true);
+
     const payload = {
       customerId: customerId || undefined,
-      paymentMethod,
-      cashAmount:
-        paymentMethod === "CASH"
-          ? amountPaid
-          : paymentMethod === "SPLIT"
-            ? cashAmount
-            : undefined,
-      qrAmount:
-        paymentMethod === "QR"
-          ? amountPaid
-          : paymentMethod === "SPLIT"
-            ? qrAmount
-            : undefined,
-      orderDiscount: orderDiscountValue
-        ? { type: orderDiscountType, value: orderDiscountValue }
-        : undefined,
+      paymentMethod: PaymentMethod.CASH,
+      cashAmount: amountPaid,
+      draftId: activeDraftId || undefined,
       items: cart.map((line) => ({
         productId: line.productId,
-        qty: line.qty
+        qty: line.qty,
+        price: line.price
       }))
     };
 
-    if (!navigator.onLine) {
-      const snapshot = buildSaleSnapshot(undefined, false);
-      await db.pendingOps.add({
-        opId: crypto.randomUUID(),
-        type: "SALE",
-        payload,
-        status: "pending",
-        retries: 0,
-        createdAt: new Date().toISOString()
-      });
-      setCompletedSale(snapshot);
-      setPaymentOpen(false);
-      resetOrderState();
-      success("Processed successfully");
-      return;
-    }
+    try {
+      if (!navigator.onLine) {
+        const snapshot = buildSaleSnapshot(amountPaid, undefined, false);
+        await db.pendingOps.add({
+          opId: crypto.randomUUID(),
+          type: "SALE",
+          payload,
+          status: "pending",
+          retries: 0,
+          createdAt: new Date().toISOString()
+        });
+        setCompletedSale(snapshot);
+        setReceiptReady(snapshot);
+        resetOrderState();
+        success("Sale saved for sync");
+        inputRef.current?.focus();
+        return;
+      }
 
-    const response = await fetch("/api/pos/transaction", {
+      const response = await fetch("/api/pos/transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        alert(data.error ?? "Failed to create sale");
+        return;
+      }
+      const data = await response.json();
+      const snapshot = buildSaleSnapshot(amountPaid, data.number, true);
+      setCompletedSale(snapshot);
+      setReceiptReady(snapshot);
+      resetOrderState();
+      await loadTransactions();
+      success(`Sale ${data.number} completed`);
+      inputRef.current?.focus();
+      if (autoPrintReceipt) {
+        window.setTimeout(() => {
+          printSaleTransaction(snapshot);
+        }, 50);
+      }
+    } finally {
+      setIsConfirmingCheckout(false);
+    }
+  }
+
+  async function holdOrder() {
+    if (!cart.length) return;
+    const response = await fetch("/api/pos/hold", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        customerId: customerId || undefined,
+        paymentMethod: PaymentMethod.CASH,
+        draftId: activeDraftId || undefined,
+        items: cart.map((line) => ({
+          productId: line.productId,
+          qty: line.qty,
+          price: line.price
+        }))
+      })
     });
     if (!response.ok) {
       const data = await response.json();
-      alert(data.error ?? "Failed to create sale");
+      alert(data.error ?? "Failed to hold order");
       return;
     }
-    const data = await response.json();
-    setCompletedSale(buildSaleSnapshot(data.number, true));
-    setPaymentOpen(false);
     resetOrderState();
     await loadTransactions();
-    success("Processed successfully");
-    const shouldPrint = window.confirm(
-      `Sale ${data.number} completed. Do you want to print the sale transaction now?`
-    );
-    if (shouldPrint) {
-      printSaleTransaction();
+    success("Changes saved successfully");
+  }
+
+  async function resumeHeldOrder(transactionId: string) {
+    if (cart.length && !window.confirm("Replace the current cart with this held order?")) {
+      return;
     }
+    const response = await fetch(`/api/pos/transactions/${transactionId}`);
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.error ?? "Failed to load held order");
+      return;
+    }
+    setCustomerId(data.customerId ?? "");
+    setActiveDraftId(data.id);
+    setActiveDraftNumber(data.number ?? null);
+    setCart(
+      (data.items ?? []).map((item: { productId: string; name: string; qty: number; price: number }) => ({
+        productId: item.productId,
+        name: item.name,
+        qty: Number(item.qty),
+        price: Number(item.price)
+      }))
+    );
+    setCompletedSale(null);
+    setReceiptReady(null);
+    setCheckoutOpen(false);
+    setView("pos");
+    inputRef.current?.focus();
   }
 
   async function postAction(action: "void" | "refund", transactionId: string) {
@@ -327,6 +399,17 @@ export function PosWorkspace({
     }
     await loadTransactions();
     success("Process successful");
+  }
+
+  async function printTransaction(transactionId: string) {
+    try {
+      const receipt = await loadReceiptRecord(transactionId);
+      window.setTimeout(() => {
+        printSaleTransaction(receipt);
+      }, 50);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to print receipt");
+    }
   }
 
   return (
@@ -371,10 +454,28 @@ export function PosWorkspace({
       ) : null}
 
       {view === "pos" ? (
+        <>
+          {receiptReady ? (
+            <div className="card pos-receipt-banner">
+              <div className="pos-receipt-banner-copy">
+                <strong>{receiptReady.txNumber ? `Sale ${receiptReady.txNumber} completed` : "Sale completed"}</strong>
+                <span className="muted">Receipt is ready. You can print now or continue with the next sale.</span>
+              </div>
+              <div className="row pos-receipt-banner-actions">
+                <SecondaryButton onClick={() => printSaleTransaction(receiptReady)}>
+                  Print Receipt
+                </SecondaryButton>
+                <SecondaryButton onClick={() => setReceiptReady(null)}>
+                  Dismiss
+                </SecondaryButton>
+              </div>
+            </div>
+          ) : null}
         <div className="pos-layout">
           <section className="pos-left">
             <ProductGrid
               products={filteredProducts}
+              showProductPhotos={allowProductPhotoUpload}
               showCompatibleUnits={enableCompatibleUnits}
               showLowStockAlerts={enableLowStockAlerts}
               lowStockThreshold={lowStockThreshold}
@@ -383,14 +484,8 @@ export function PosWorkspace({
           </section>
           <CartPanel
             cart={cart}
-            orderDiscountType={orderDiscountType}
-            orderDiscountValue={orderDiscountValue}
-            subtotal={subtotal}
-            discount={discount}
             total={total}
-            holds={holds}
-            onSetOrderDiscountType={setOrderDiscountType}
-            onSetOrderDiscountValue={setOrderDiscountValue}
+            orderLabel={activeDraftNumber ? `Order ${activeDraftNumber}` : "New Order"}
             onIncrementQty={(productId) =>
               setCart((prev) =>
                 prev.map((line) =>
@@ -410,20 +505,19 @@ export function PosWorkspace({
             onRemoveLine={(productId) =>
               setCart((prev) => prev.filter((line) => line.productId !== productId))
             }
-            onHoldOrder={holdOrder}
-            onCancelOrder={resetOrderState}
-            onResumeHold={resumeHold}
-            onOpenPayment={() => {
+            onClearCart={resetOrderState}
+            onHoldOrder={() => void holdOrder()}
+            onOpenCheckout={() => {
               if (!cart.length) return;
-              setPaymentOpen(true);
+              setCheckoutOpen(true);
             }}
           />
         </div>
+        </>
       ) : (
         <div className="card">
           <div className="pos-transactions-head">
             <h2 className="section-title">Transactions</h2>
-            <SecondaryButton onClick={loadTransactions}>Refresh</SecondaryButton>
           </div>
           <div className="table-wrap">
             <table>
@@ -440,17 +534,32 @@ export function PosWorkspace({
                 {recentTransactions.map((row) => (
                   <tr key={row.id}>
                     <td>{row.number}</td>
-                    <td>{row.status}</td>
-                    <td>PHP {Number(row.totalAmount).toFixed(2)}</td>
+                    <td>{row.status === TransactionStatus.DRAFT ? "HELD" : row.status}</td>
+                    <td>{formatCurrency(row.totalAmount)}</td>
                     <td>{row.createdAt ? new Date(row.createdAt).toLocaleString("en-PH") : "-"}</td>
                     <td>
-                      {session?.user.role === "OWNER" || session?.user.role === "MANAGER" ? (
+                      {row.status === TransactionStatus.DRAFT ? (
                         <div className="row">
+                          <button className="btn-secondary" onClick={() => void resumeHeldOrder(row.id)}>
+                            Resume
+                          </button>
+                        </div>
+                      ) : session?.user.role === "OWNER" || session?.user.role === "MANAGER" ? (
+                        <div className="row">
+                          <button className="btn-secondary" onClick={() => void printTransaction(row.id)}>
+                            {row.status === TransactionStatus.COMPLETED ? "Print" : "Reprint"}
+                          </button>
                           <button className="btn-secondary" onClick={() => postAction("void", row.id)}>
                             Void
                           </button>
                           <button className="btn-secondary" onClick={() => postAction("refund", row.id)}>
                             Refund
+                          </button>
+                        </div>
+                      ) : row.status === TransactionStatus.COMPLETED || row.status === TransactionStatus.REFUNDED || row.status === TransactionStatus.VOID ? (
+                        <div className="row">
+                          <button className="btn-secondary" onClick={() => void printTransaction(row.id)}>
+                            {row.status === TransactionStatus.COMPLETED ? "Print" : "Reprint"}
                           </button>
                         </div>
                       ) : (
@@ -465,84 +574,19 @@ export function PosWorkspace({
         </div>
       )}
 
-      <PaymentModal
-        open={paymentOpen}
+      <CheckoutModal
+        open={checkoutOpen}
         total={total}
-        paymentMethod={paymentMethod}
-        amountPaid={amountPaid}
-        cashAmount={cashAmount}
-        qrAmount={qrAmount}
-        onClose={() => setPaymentOpen(false)}
-        onConfirm={completeSale}
-        onSetPaymentMethod={(value) => {
-          setPaymentMethod(value);
-          if (value === "CASH" || value === "QR") {
-            setAmountPaid(total);
-          }
+        itemCount={totalItems}
+        confirming={isConfirmingCheckout}
+        onClose={() => {
+          if (isConfirmingCheckout) return;
+          setCheckoutOpen(false);
         }}
-        onSetAmountPaid={setAmountPaid}
-        onSetCashAmount={setCashAmount}
-        onSetQrAmount={setQrAmount}
+        onConfirm={completeSale}
       />
 
-      {completedSale ? (
-        <div className="print-receipt" aria-hidden>
-          <div className="receipt-brand">MICROBIZ STORE</div>
-          <div className="receipt-meta">{new Date(completedSale.createdAt).toLocaleDateString("en-PH")}</div>
-          <div className="receipt-meta">{new Date(completedSale.createdAt).toLocaleTimeString("en-PH")}</div>
-          <div className="receipt-meta">
-            {completedSale.txNumber ? `TXN ${completedSale.txNumber}` : "PENDING SYNC TXN"}
-          </div>
-          <div className="receipt-meta">
-            {completedSale.customerName ? `CUSTOMER: ${completedSale.customerName}` : "CUSTOMER: WALK-IN"}
-          </div>
-          <div className="receipt-divider" />
-          <div className="receipt-head">
-            <span>QTY</span>
-            <span>DESC</span>
-            <span>AMT</span>
-          </div>
-          <div className="receipt-divider" />
-          {completedSale.items.map((item) => (
-            <div key={`${item.name}-${item.qty}`} className="receipt-row">
-              <span>{item.qty}</span>
-              <span>{item.name}</span>
-              <span>PHP {item.lineTotal.toFixed(2)}</span>
-            </div>
-          ))}
-          <div className="receipt-divider" />
-          <div className="receipt-total-row">
-            <span>SUBTOTAL</span>
-            <span>PHP {completedSale.subtotal.toFixed(2)}</span>
-          </div>
-          <div className="receipt-total-row">
-            <span>DISCOUNT</span>
-            <span>PHP {completedSale.discount.toFixed(2)}</span>
-          </div>
-          <div className="receipt-total-row receipt-grand">
-            <span>TOTAL</span>
-            <span>PHP {completedSale.total.toFixed(2)}</span>
-          </div>
-          <div className="receipt-total-row">
-            <span>PAYMENT</span>
-            <span>{completedSale.paymentMethod}</span>
-          </div>
-          {completedSale.cashAmount != null ? (
-            <div className="receipt-total-row">
-              <span>CASH</span>
-              <span>PHP {completedSale.cashAmount.toFixed(2)}</span>
-            </div>
-          ) : null}
-          {completedSale.qrAmount != null ? (
-            <div className="receipt-total-row">
-              <span>QR</span>
-              <span>PHP {completedSale.qrAmount.toFixed(2)}</span>
-            </div>
-          ) : null}
-          <div className="receipt-divider" />
-          <div className="receipt-foot">Thank you for your purchase.</div>
-        </div>
-      ) : null}
+      {printableReceipt ? <ReceiptPrint data={printableReceipt} /> : null}
     </div>
   );
 }

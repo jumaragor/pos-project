@@ -2,6 +2,7 @@ import { TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DataTable } from "@/components/ui/data-table";
 import { MetricWidget } from "@/components/ui/metric-widget";
+import { formatCurrency, formatNumber } from "@/lib/format";
 import { getInventorySettings } from "@/lib/inventory-settings";
 
 export const dynamic = "force-dynamic";
@@ -67,20 +68,20 @@ export default async function DashboardPage() {
   return (
     <div className="grid">
       <div className="grid grid-4">
-        <MetricWidget label="Today's Sales" value={`PHP ${todaySales.toFixed(2)}`} trend="+3.2%" trendDir="up" />
+        <MetricWidget label="Today's Sales" value={formatCurrency(todaySales)} trend="+3.2%" trendDir="up" />
         <MetricWidget
           label="Today's Profit"
-          value={`PHP ${todayProfit.toFixed(2)}`}
+          value={formatCurrency(todayProfit)}
           trend={todayProfit >= 0 ? "+2.1%" : "-2.1%"}
           trendDir={todayProfit >= 0 ? "up" : "down"}
         />
         <MetricWidget
           label="Transactions Today"
-          value={`${transactions.length}`}
+          value={formatNumber(transactions.length)}
           trend={transactions.length > 0 ? "+1.4%" : "0.0%"}
           trendDir="up"
         />
-        <MetricWidget label="Cash on Hand" value={`PHP ${cashOnHand.toFixed(2)}`} trend="+0.8%" trendDir="up" />
+        <MetricWidget label="Cash on Hand" value={formatCurrency(cashOnHand)} trend="+0.8%" trendDir="up" />
       </div>
 
       <div className="grid grid-2">
@@ -97,8 +98,8 @@ export default async function DashboardPage() {
               {topSelling.map((item) => (
                 <tr key={item.name}>
                   <td>{item.name}</td>
-                  <td>{item.qty}</td>
-                  <td>PHP {item.sales.toFixed(2)}</td>
+                  <td>{formatNumber(item.qty)}</td>
+                  <td>{formatCurrency(item.sales)}</td>
                 </tr>
               ))}
             </tbody>
@@ -122,8 +123,8 @@ export default async function DashboardPage() {
                     <tr key={item.id}>
                       <td>{item.name}</td>
                       <td>{item.sku}</td>
-                      <td>{Number(item.stockQty)}</td>
-                      <td>{inventorySettings.lowStockThreshold}</td>
+                      <td>{formatNumber(item.stockQty)}</td>
+                      <td>{formatNumber(inventorySettings.lowStockThreshold)}</td>
                     </tr>
                   ))
                 ) : (

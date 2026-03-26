@@ -71,12 +71,16 @@ type SettingsShape = {
   enableLowStockAlerts: boolean;
   enableTax: boolean;
   defaultTaxRate: number;
+  taxLabel: string;
   taxInclusivePricing: boolean;
   allowManualTaxEntryInPurchases: boolean;
   enableBarcodeScanner: boolean;
   allowPriceOverride: boolean;
   allowDiscountEntry: boolean;
   autoPrintReceipt: boolean;
+  showCashierName: boolean;
+  showCustomerName: boolean;
+  showChangeAmount: boolean;
   defaultPaymentMethod: "CASH" | "GCASH" | "CARD";
   requireCustomerBeforeSale: boolean;
   storeName: string;
@@ -91,9 +95,7 @@ type SettingsShape = {
   enableProductCategories: boolean;
   enableCompatibleUnits: boolean;
   allowProductPhotoUpload: boolean;
-  requireSKU: boolean;
   autoGenerateSKU: boolean;
-  skuGenerationMode: "MANUAL" | "GLOBAL" | "CATEGORY_BASED";
   currency: "PHP";
   dateFormat: "MM/DD/YYYY" | "DD/MM/YYYY" | "YYYY-MM-DD";
   numberFormat: "1,000.00" | "1.000,00";
@@ -124,12 +126,16 @@ const defaultSettings: SettingsShape = {
   enableLowStockAlerts: true,
   enableTax: true,
   defaultTaxRate: 12,
+  taxLabel: "VAT",
   taxInclusivePricing: false,
   allowManualTaxEntryInPurchases: true,
   enableBarcodeScanner: true,
   allowPriceOverride: false,
   allowDiscountEntry: true,
   autoPrintReceipt: false,
+  showCashierName: true,
+  showCustomerName: true,
+  showChangeAmount: true,
   defaultPaymentMethod: "CASH",
   requireCustomerBeforeSale: false,
   storeName: "MicroBiz POS",
@@ -144,9 +150,7 @@ const defaultSettings: SettingsShape = {
   enableProductCategories: true,
   enableCompatibleUnits: true,
   allowProductPhotoUpload: true,
-  requireSKU: true,
   autoGenerateSKU: false,
-  skuGenerationMode: "GLOBAL",
   currency: "PHP",
   dateFormat: "MM/DD/YYYY",
   numberFormat: "1,000.00",
@@ -335,6 +339,9 @@ export function ConfigurationScreen() {
     }
     setUserOpen(false);
     await loadUsers();
+    if (activeUser?.id === data?.user?.id) {
+      window.dispatchEvent(new Event("microbiz:user-updated"));
+    }
     success(userMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
   }
 
@@ -604,6 +611,7 @@ export function ConfigurationScreen() {
             <h2 className="section-title">Tax Settings</h2>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableTax} onChange={(e) => setSettings((p) => ({ ...p, enableTax: e.target.checked }))} />Enable Tax</label>
             <label className="form-field"><span className="field-label">Default Tax Rate (%)</span><input type="number" value={settings.defaultTaxRate} onChange={(e) => setSettings((p) => ({ ...p, defaultTaxRate: Number(e.target.value) }))} /></label>
+            <label className="form-field"><span className="field-label">Tax Label</span><input value={settings.taxLabel} onChange={(e) => setSettings((p) => ({ ...p, taxLabel: e.target.value }))} /></label>
             <label className="configuration-check"><input type="checkbox" checked={settings.taxInclusivePricing} onChange={(e) => setSettings((p) => ({ ...p, taxInclusivePricing: e.target.checked }))} />Tax Inclusive Pricing</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowManualTaxEntryInPurchases} onChange={(e) => setSettings((p) => ({ ...p, allowManualTaxEntryInPurchases: e.target.checked }))} />Allow Manual Tax Entry in Purchases</label>
             <div className="configuration-actions">
@@ -613,6 +621,7 @@ export function ConfigurationScreen() {
                   saveSettings([
                     "enableTax",
                     "defaultTaxRate",
+                    "taxLabel",
                     "taxInclusivePricing",
                     "allowManualTaxEntryInPurchases"
                   ])
@@ -631,10 +640,13 @@ export function ConfigurationScreen() {
             <label className="configuration-check"><input type="checkbox" checked={settings.allowPriceOverride} onChange={(e) => setSettings((p) => ({ ...p, allowPriceOverride: e.target.checked }))} />Allow Price Override</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowDiscountEntry} onChange={(e) => setSettings((p) => ({ ...p, allowDiscountEntry: e.target.checked }))} />Allow Discount Entry</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.autoPrintReceipt} onChange={(e) => setSettings((p) => ({ ...p, autoPrintReceipt: e.target.checked }))} />Auto Print Receipt</label>
+            <label className="configuration-check"><input type="checkbox" checked={settings.showCashierName} onChange={(e) => setSettings((p) => ({ ...p, showCashierName: e.target.checked }))} />Show Cashier Name on Receipt</label>
+            <label className="configuration-check"><input type="checkbox" checked={settings.showCustomerName} onChange={(e) => setSettings((p) => ({ ...p, showCustomerName: e.target.checked }))} />Show Customer Name on Receipt</label>
+            <label className="configuration-check"><input type="checkbox" checked={settings.showChangeAmount} onChange={(e) => setSettings((p) => ({ ...p, showChangeAmount: e.target.checked }))} />Show Change Amount on Receipt</label>
             <label className="form-field"><span className="field-label">Default Payment Method</span><select value={settings.defaultPaymentMethod} onChange={(e) => setSettings((p) => ({ ...p, defaultPaymentMethod: e.target.value as SettingsShape["defaultPaymentMethod"] }))}><option value="CASH">Cash</option><option value="GCASH">GCash</option><option value="CARD">Card</option></select></label>
             <label className="configuration-check"><input type="checkbox" checked={settings.requireCustomerBeforeSale} onChange={(e) => setSettings((p) => ({ ...p, requireCustomerBeforeSale: e.target.checked }))} />Require Customer Before Sale</label>
             <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "defaultPaymentMethod", "requireCustomerBeforeSale"])}>Save Changes</PrimaryButton>
+              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "showCashierName", "showCustomerName", "showChangeAmount", "defaultPaymentMethod", "requireCustomerBeforeSale"])}>Save Changes</PrimaryButton>
             </div>
           </>
         );
@@ -665,26 +677,12 @@ export function ConfigurationScreen() {
             <label className="configuration-check"><input type="checkbox" checked={settings.enableProductCategories} onChange={(e) => setSettings((p) => ({ ...p, enableProductCategories: e.target.checked }))} />Enable Product Categories</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableCompatibleUnits} onChange={(e) => setSettings((p) => ({ ...p, enableCompatibleUnits: e.target.checked }))} />Enable Compatible Units</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowProductPhotoUpload} onChange={(e) => setSettings((p) => ({ ...p, allowProductPhotoUpload: e.target.checked }))} />Allow Product Photo Upload</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.requireSKU} onChange={(e) => setSettings((p) => ({ ...p, requireSKU: e.target.checked }))} />Require SKU</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.autoGenerateSKU} onChange={(e) => setSettings((p) => ({ ...p, autoGenerateSKU: e.target.checked }))} />Auto Generate SKU</label>
-            <label className="form-field">
-              <span className="field-label">SKU Generation Mode</span>
-              <select
-                value={settings.skuGenerationMode}
-                onChange={(e) =>
-                  setSettings((p) => ({
-                    ...p,
-                    skuGenerationMode: e.target.value as SettingsShape["skuGenerationMode"]
-                  }))
-                }
-              >
-                <option value="MANUAL">Manual</option>
-                <option value="GLOBAL">Global</option>
-                <option value="CATEGORY_BASED">Category-Based</option>
-              </select>
-            </label>
+            <div className="field-help">
+              When enabled, SKU is generated automatically from the selected category prefix. When disabled, SKU is entered manually.
+            </div>
             <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableProductCategories", "enableCompatibleUnits", "allowProductPhotoUpload", "requireSKU", "autoGenerateSKU", "skuGenerationMode"], "Product settings updated successfully")}>Save Changes</PrimaryButton>
+              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableProductCategories", "enableCompatibleUnits", "allowProductPhotoUpload", "autoGenerateSKU"], "Product settings updated successfully")}>Save Changes</PrimaryButton>
             </div>
           </>
         );

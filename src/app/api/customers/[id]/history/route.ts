@@ -1,3 +1,4 @@
+import { TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ok } from "@/lib/http";
 
@@ -6,7 +7,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
   const transactions = await prisma.transaction.findMany({
-    where: { customerId: id },
+    where: { customerId: id, status: TransactionStatus.COMPLETED },
     select: {
       id: true,
       number: true,

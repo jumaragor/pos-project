@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { useToast } from "@/components/toast-provider";
+import { formatCurrency, formatNumber } from "@/lib/format";
 
 type Customer = {
   id: string;
@@ -35,13 +36,8 @@ type AddCustomerForm = {
   address: string;
 };
 
-const money = new Intl.NumberFormat("en-PH", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-});
-
 function formatMoney(value: number) {
-  return `PHP ${money.format(value)}`;
+  return formatCurrency(value);
 }
 
 function formatDateTime(value: string | null) {
@@ -292,7 +288,7 @@ export function CustomersScreen({
               </div>
               <div>
                 <span className="muted">Total Visits</span>
-                <strong>{selectedTotalVisits}</strong>
+                <strong>{formatNumber(selectedTotalVisits)}</strong>
               </div>
               <div>
                 <span className="muted">Last Visit</span>

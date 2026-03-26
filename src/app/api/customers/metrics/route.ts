@@ -1,10 +1,11 @@
+import { TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ok } from "@/lib/http";
 
 export async function GET() {
   const grouped = await prisma.transaction.groupBy({
     by: ["customerId"],
-    where: { customerId: { not: null } },
+    where: { customerId: { not: null }, status: TransactionStatus.COMPLETED },
     _sum: { totalAmount: true },
     _count: { _all: true },
     _max: { createdAt: true }

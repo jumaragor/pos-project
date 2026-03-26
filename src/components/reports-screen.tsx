@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { useToast } from "@/components/toast-provider";
+import { formatCurrency, formatNumber } from "@/lib/format";
 
 type ReportTab = "overview" | "sales" | "product" | "inventory" | "purchase" | "customer";
 
@@ -65,7 +66,7 @@ const tabMeta: Array<{ key: ReportTab; label: string }> = [
 ];
 
 function formatMoney(value: number) {
-  return `PHP ${value.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatCurrency(value);
 }
 
 function dateInput(value: Date) {
@@ -152,7 +153,7 @@ export function ReportsScreen() {
         row.receiptNo,
         row.items.toString(),
         row.paymentMethod,
-        row.total.toFixed(2)
+        formatNumber(row.total, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       ]
         .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
         .join(",")
@@ -232,7 +233,7 @@ export function ReportsScreen() {
               </div>
               <div className="card reports-metric-card reports-metric-transactions">
                 <span className="muted">Transactions</span>
-                <strong>{overview?.transactionCount ?? 0}</strong>
+                <strong>{formatNumber(overview?.transactionCount ?? 0)}</strong>
               </div>
               <div className="card reports-metric-card reports-metric-profit">
                 <span className="muted">Profit</span>
@@ -311,7 +312,7 @@ export function ReportsScreen() {
                     {(overview?.topItems ?? []).map((item) => (
                       <tr key={item.productId}>
                         <td>{item.productName}</td>
-                        <td>{item.qty.toLocaleString("en-PH")}</td>
+                        <td>{formatNumber(item.qty)}</td>
                         <td>{formatMoney(item.subtotal)}</td>
                       </tr>
                     ))}
@@ -370,7 +371,7 @@ export function ReportsScreen() {
                   <tr key={row.id}>
                     <td>{formatDateTime(row.date)}</td>
                     <td>{row.receiptNo}</td>
-                    <td>{row.items}</td>
+                    <td>{formatNumber(row.items)}</td>
                     <td>{row.paymentMethod}</td>
                     <td>{formatMoney(row.total)}</td>
                   </tr>
@@ -403,7 +404,7 @@ export function ReportsScreen() {
                 {productRows.map((row) => (
                   <tr key={row.productName}>
                     <td>{row.productName}</td>
-                    <td>{row.quantitySold.toLocaleString("en-PH")}</td>
+                    <td>{formatNumber(row.quantitySold)}</td>
                     <td>{formatMoney(row.revenue)}</td>
                     <td>{formatMoney(row.profit)}</td>
                   </tr>
@@ -443,7 +444,7 @@ export function ReportsScreen() {
                     <tr key={row.id} className={status === "Low Stock" ? "reports-low-stock-row" : undefined}>
                       <td>{row.name}</td>
                       <td>{row.category}</td>
-                      <td>{stock}</td>
+                      <td>{formatNumber(stock)}</td>
                       <td>
                         <span className={`badge ${statusClass}`}>{status}</span>
                       </td>
@@ -479,7 +480,7 @@ export function ReportsScreen() {
                   <tr key={row.id}>
                     <td>{formatDateOnly(row.date)}</td>
                     <td>{row.supplier}</td>
-                    <td>{row.items}</td>
+                    <td>{formatNumber(row.items)}</td>
                     <td>{formatMoney(row.totalCost)}</td>
                   </tr>
                 ))}
@@ -511,7 +512,7 @@ export function ReportsScreen() {
                 {customerRows.map((row) => (
                   <tr key={row.customerName}>
                     <td>{row.customerName}</td>
-                    <td>{row.visits}</td>
+                    <td>{formatNumber(row.visits)}</td>
                     <td>{formatMoney(row.totalSpent)}</td>
                     <td>{row.lastVisit ? formatDateTime(row.lastVisit) : "-"}</td>
                   </tr>
