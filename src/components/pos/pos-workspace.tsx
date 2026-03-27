@@ -60,7 +60,6 @@ export function PosWorkspace({
   const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(true);
   const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
-  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
   const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
@@ -69,7 +68,6 @@ export function PosWorkspace({
   const [activeDraftNumber, setActiveDraftNumber] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [completedSale, setCompletedSale] = useState<ReceiptRecord | null>(null);
-  const [receiptReady, setReceiptReady] = useState<ReceiptRecord | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [isConfirmingCheckout, setIsConfirmingCheckout] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<TransactionRow[]>([]);
@@ -128,7 +126,6 @@ export function PosWorkspace({
       setAllowProductPhotoUpload(payload.allowProductPhotoUpload !== false);
       setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
-      setAutoPrintReceipt(payload.autoPrintReceipt === true);
       setReceiptSettings({
         businessName: String(payload.businessName ?? ""),
         storeName: String(payload.storeName ?? "MicroBiz POS"),
@@ -195,7 +192,6 @@ export function PosWorkspace({
 
   function onNewSale() {
     resetOrderState();
-    setReceiptReady(null);
     setView("pos");
     inputRef.current?.focus();
   }
@@ -225,7 +221,7 @@ export function PosWorkspace({
     };
   }
 
-  function printSaleTransaction(sale: ReceiptRecord | null = receiptReady ?? completedSale) {
+  function printSaleTransaction(sale: ReceiptRecord | null = completedSale) {
     if (!sale) return;
     setCompletedSale(sale);
     window.print();
@@ -260,7 +256,6 @@ export function PosWorkspace({
       }))
     };
     setCompletedSale(receipt);
-    setReceiptReady(receipt);
     return receipt;
   }
 
@@ -297,7 +292,6 @@ export function PosWorkspace({
           createdAt: new Date().toISOString()
         });
         setCompletedSale(snapshot);
-        setReceiptReady(snapshot);
         resetOrderState();
         success("Sale saved for sync");
         inputRef.current?.focus();
@@ -317,16 +311,13 @@ export function PosWorkspace({
       const data = await response.json();
       const snapshot = buildSaleSnapshot(amountPaid, data.number, true);
       setCompletedSale(snapshot);
-      setReceiptReady(snapshot);
       resetOrderState();
       await loadTransactions();
       success(`Sale ${data.number} completed`);
       inputRef.current?.focus();
-      if (autoPrintReceipt) {
-        window.setTimeout(() => {
-          printSaleTransaction(snapshot);
-        }, 50);
-      }
+      window.setTimeout(() => {
+        printSaleTransaction(snapshot);
+      }, 50);
     } finally {
       setIsConfirmingCheckout(false);
     }
@@ -380,7 +371,6 @@ export function PosWorkspace({
       }))
     );
     setCompletedSale(null);
-    setReceiptReady(null);
     setCheckoutOpen(false);
     setView("pos");
     inputRef.current?.focus();
@@ -455,22 +445,6 @@ export function PosWorkspace({
 
       {view === "pos" ? (
         <>
-          {receiptReady ? (
-            <div className="card pos-receipt-banner">
-              <div className="pos-receipt-banner-copy">
-                <strong>{receiptReady.txNumber ? `Sale ${receiptReady.txNumber} completed` : "Sale completed"}</strong>
-                <span className="muted">Receipt is ready. You can print now or continue with the next sale.</span>
-              </div>
-              <div className="row pos-receipt-banner-actions">
-                <SecondaryButton onClick={() => printSaleTransaction(receiptReady)}>
-                  Print Receipt
-                </SecondaryButton>
-                <SecondaryButton onClick={() => setReceiptReady(null)}>
-                  Dismiss
-                </SecondaryButton>
-              </div>
-            </div>
-          ) : null}
         <div className="pos-layout">
           <section className="pos-left">
             <ProductGrid

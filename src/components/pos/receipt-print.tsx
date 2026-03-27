@@ -1,22 +1,58 @@
 import { formatCurrency, formatNumber } from "@/lib/format";
 import { ReceiptData } from "@/lib/receipt";
 
-export function ReceiptPrint({ data }: { data: ReceiptData }) {
+const PRINT_COPIES = 1;
+const RECEIPT_LINE_WIDTH = 32;
+
+function truncateReceiptText(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 1) return value.slice(0, maxLength);
+  return `${value.slice(0, maxLength - 1)}~`;
+}
+
+function formatReceiptMetaRow(left: string, right?: string) {
+  const safeLeft = left.trim();
+  const safeRight = right?.trim() ?? "";
+
+  if (!safeRight) {
+    return truncateReceiptText(safeLeft, RECEIPT_LINE_WIDTH);
+  }
+
+  const minimumGap = 2;
+  const maxRightWidth = Math.floor(RECEIPT_LINE_WIDTH * 0.5);
+  const trimmedRight = truncateReceiptText(safeRight, maxRightWidth);
+  const availableLeftWidth = Math.max(8, RECEIPT_LINE_WIDTH - trimmedRight.length - minimumGap);
+  const trimmedLeft = truncateReceiptText(safeLeft, availableLeftWidth);
+  const gapWidth = Math.max(minimumGap, RECEIPT_LINE_WIDTH - trimmedLeft.length - trimmedRight.length);
+
+  return `${trimmedLeft}${" ".repeat(gapWidth)}${trimmedRight}`;
+}
+
+function ReceiptCopy({ data }: { data: ReceiptData }) {
+  const formattedDate = new Date(data.createdAt);
+  const footerNote = "This is not an official receipt";
+  const metaRows = [
+    formatReceiptMetaRow(
+      formattedDate.toLocaleDateString("en-PH"),
+      data.transactionNumber ?? undefined
+    ),
+    formatReceiptMetaRow(
+      formattedDate.toLocaleTimeString("en-PH"),
+      data.cashierName ?? undefined
+    )
+  ];
+
   return (
-    <div className="print-receipt" aria-hidden>
-      <div className="receipt-brand">{data.businessName}</div>
-      {data.tradeName ? <div className="receipt-meta">{data.tradeName}</div> : null}
-      {data.address ? <div className="receipt-meta">{data.address}</div> : null}
-      {data.contactNumber ? <div className="receipt-meta">TEL: {data.contactNumber}</div> : null}
-      {data.email ? <div className="receipt-meta">{data.email}</div> : null}
-      {data.tin ? <div className="receipt-meta">TIN: {data.tin}</div> : null}
-      {data.permitNo ? <div className="receipt-meta">PERMIT: {data.permitNo}</div> : null}
+    <section className="receipt-copy">
+      {data.businessName ? <div className="receipt-brand">{data.businessName}</div> : null}
       <div className="receipt-divider" />
-      <div className="receipt-meta">{new Date(data.createdAt).toLocaleDateString("en-PH")}</div>
-      <div className="receipt-meta">{new Date(data.createdAt).toLocaleTimeString("en-PH")}</div>
-      {data.transactionNumber ? <div className="receipt-meta">TXN {data.transactionNumber}</div> : null}
-      {data.cashierName ? <div className="receipt-meta">CASHIER: {data.cashierName}</div> : null}
-      {data.customerName ? <div className="receipt-meta">CUSTOMER: {data.customerName}</div> : null}
+      <div className="receipt-meta-compact">
+        {metaRows.map((row, index) => (
+          <div key={`${row}-${index}`} className="receipt-meta-line">
+            {row}
+          </div>
+        ))}
+      </div>
       <div className="receipt-divider" />
       <div className="receipt-head">
         <span>QTY</span>
@@ -24,8 +60,8 @@ export function ReceiptPrint({ data }: { data: ReceiptData }) {
         <span>AMT</span>
       </div>
       <div className="receipt-divider" />
-      {data.items.map((item) => (
-        <div key={`${item.name}-${item.qty}-${item.lineTotal}`} className="receipt-row">
+      {data.items.map((item, index) => (
+        <div key={`${item.name}-${item.qty}-${item.lineTotal}-${index}`} className="receipt-row">
           <span>{formatNumber(item.qty)}</span>
           <span className="receipt-item-copy">
             <strong>{item.name}</strong>
@@ -80,12 +116,21 @@ export function ReceiptPrint({ data }: { data: ReceiptData }) {
           <span>{formatCurrency(data.changeAmount)}</span>
         </div>
       ) : null}
-      {data.footerMessage ? (
-        <>
-          <div className="receipt-divider" />
-          <div className="receipt-foot">{data.footerMessage}</div>
-        </>
+      <div className="receipt-divider" />
+      <div className="receipt-foot">{footerNote}</div>
+      {data.footerMessage && data.footerMessage !== footerNote ? (
+        <div className="receipt-foot">{data.footerMessage}</div>
       ) : null}
+    </section>
+  );
+}
+
+export function ReceiptPrint({ data }: { data: ReceiptData }) {
+  return (
+    <div className="print-receipt" aria-hidden>
+      {Array.from({ length: PRINT_COPIES }).map((_, index) => (
+        <ReceiptCopy key={`receipt-copy-${index}`} data={data} />
+      ))}
     </div>
   );
 }
