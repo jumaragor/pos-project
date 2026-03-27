@@ -7,12 +7,14 @@ import { formatCurrency, formatNumber } from "@/lib/format";
 import { sanitizeDecimalInput, toNumber } from "@/lib/numeric-input";
 import { isVoidedPurchaseNote } from "@/lib/purchase-utils";
 import { useToast } from "@/components/toast-provider";
+import { SearchIcon } from "@/components/ui/app-icons";
 
 type ProductOption = {
   id: string;
   name: string;
   sku: string;
   unit: string;
+  unitCost: number;
 };
 
 type PurchaseItemRow = {
@@ -60,7 +62,15 @@ type SupplierOption = {
   id: string;
   supplierCode: string;
   supplierName: string;
+  contactPerson?: string | null;
+  mobileNumber?: string | null;
+  address?: string | null;
   status: SupplierStatus;
+};
+
+type ProductSearchState = {
+  rowId: string | null;
+  highlightedIndex: number;
 };
 
 type FormMode = "create" | "edit" | "view";
@@ -74,12 +84,11 @@ type PurchaseForm = {
   items: PurchaseItemRow[];
 };
 
-function emptyItem(products: ProductOption[]): PurchaseItemRow {
-  const first = products[0];
+function emptyItem(): PurchaseItemRow {
   return {
     id: crypto.randomUUID(),
-    productId: first?.id ?? "",
-    productName: first?.name ?? "",
+    productId: "",
+    productName: "",
     quantity: 1,
     unitCost: 0,
     amount: 0,
@@ -91,6 +100,14 @@ function emptyItem(products: ProductOption[]): PurchaseItemRow {
 
 function todayDateInput() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function productOptionLabel(product: ProductOption) {
+  return `${product.name} (${product.sku})`;
+}
+
+function supplierOptionLabel(supplier: SupplierOption) {
+  return `${supplier.supplierName} (${supplier.supplierCode})`;
 }
 
 function toDateInput(isoDate: string) {
@@ -162,9 +179,18 @@ export function PurchasesScreen({
   const [formMode, setFormMode] = useState<FormMode>("create");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveAction, setSaveAction] = useState<PurchaseStatus | null>(null);
+  const [remarksOpen, setRemarksOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
+  const [supplierPickerQuery, setSupplierPickerQuery] = useState("");
   const [activePurchase, setActivePurchase] = useState<PurchaseRow | null>(null);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [productSearchState, setProductSearchState] = useState<ProductSearchState>({
+    rowId: null,
+    highlightedIndex: 0
+  });
   const [form, setForm] = useState<PurchaseForm>({
     purchaseDate: todayDateInput(),
     supplierId: "",
@@ -173,6 +199,7 @@ export function PurchasesScreen({
     status: PurchaseStatus.POSTED,
     items: []
   });
+  const [productSearchByRow, setProductSearchByRow] = useState<Record<string, string>>({});
 
   const loadPurchases = useCallback(async (page = pagination.page, search = query) => {
     setLoadingList(true);
@@ -222,9 +249,9 @@ export function PurchasesScreen({
         fetch("/api/suppliers?activeOnly=true&pageSize=200")
       ]);
       if (productsResponse.ok) {
-        const payload = (await productsResponse.json()) as { items: ProductOption[] };
-        nextProducts = payload.items;
-        setProducts(payload.items);
+      const payload = (await productsResponse.json()) as { items: ProductOption[] };
+      nextProducts = payload.items;
+      setProducts(payload.items);
       }
       if (suppliersResponse.ok) {
         const payload = (await suppliersResponse.json()) as { items: SupplierOption[] };
@@ -334,27 +361,55 @@ export function PurchasesScreen({
     const options = await loadFormOptions();
     const nextProducts = options?.products ?? products;
     const nextSuppliers = options?.suppliers ?? suppliers;
+    const initialItems = nextProducts.length ? [emptyItem()] : [];
+    const defaultSupplier = nextSuppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE);
     setFormMode("create");
     setActivePurchase(null);
     setForm({
       purchaseDate: todayDateInput(),
-      supplierId: nextSuppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE)?.id ?? "",
+      supplierId: defaultSupplier?.id ?? "",
       referenceNumber: "",
       notes: "",
       status: PurchaseStatus.POSTED,
-      items: nextProducts.length ? [emptyItem(nextProducts)] : []
+      items: initialItems
     });
+    setProductSearchByRow(
+      Object.fromEntries(initialItems.map((item) => [item.id, item.productName]))
+    );
+    setSupplierSearch(defaultSupplier ? supplierOptionLabel(defaultSupplier) : "");
+    setSupplierPickerOpen(false);
+    setSupplierPickerQuery("");
+    setRemarksOpen(false);
     setOpen(true);
   }
 
   async function openEdit(purchase: PurchaseRow) {
     setLoadingDetail(true);
     try {
-      await loadFormOptions();
+      const options = await loadFormOptions();
+      const nextProducts = options?.products ?? products;
+      const nextSuppliers = options?.suppliers ?? suppliers;
       const detail = await loadPurchaseDetail(purchase.id);
       setFormMode("edit");
       setActivePurchase(detail);
       setForm(makeFormFromPurchase(detail));
+      const selectedSupplier = nextSuppliers.find((supplier) => supplier.id === detail.supplierId);
+      setSupplierSearch(
+        selectedSupplier
+          ? supplierOptionLabel(selectedSupplier)
+          : detail.supplierName ?? ""
+      );
+      setSupplierPickerOpen(false);
+      setSupplierPickerQuery("");
+      setRemarksOpen(Boolean(detail.notes?.trim()));
+      setProductSearchByRow(
+        Object.fromEntries(
+          detail.items.map((item) => {
+            const product = nextProducts.find((option) => option.id === item.productId);
+            return [item.id, product ? productOptionLabel(product) : item.productName];
+          })
+        )
+      );
       setOpen(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to load purchase");
@@ -366,11 +421,30 @@ export function PurchasesScreen({
   async function openView(purchase: PurchaseRow) {
     setLoadingDetail(true);
     try {
-      await loadFormOptions();
+      const options = await loadFormOptions();
+      const nextProducts = options?.products ?? products;
+      const nextSuppliers = options?.suppliers ?? suppliers;
       const detail = await loadPurchaseDetail(purchase.id);
       setFormMode("view");
       setActivePurchase(detail);
       setForm(makeFormFromPurchase(detail));
+      const selectedSupplier = nextSuppliers.find((supplier) => supplier.id === detail.supplierId);
+      setSupplierSearch(
+        selectedSupplier
+          ? supplierOptionLabel(selectedSupplier)
+          : detail.supplierName ?? ""
+      );
+      setSupplierPickerOpen(false);
+      setSupplierPickerQuery("");
+      setRemarksOpen(Boolean(detail.notes?.trim()));
+      setProductSearchByRow(
+        Object.fromEntries(
+          detail.items.map((item) => {
+            const product = nextProducts.find((option) => option.id === item.productId);
+            return [item.id, product ? productOptionLabel(product) : item.productName];
+          })
+        )
+      );
       setOpen(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Failed to load purchase");
@@ -416,7 +490,12 @@ export function PurchasesScreen({
   }
 
   function addItemRow() {
-    setForm((prev) => ({ ...prev, items: [...prev.items, emptyItem(products)] }));
+    const nextItem = emptyItem();
+    setForm((prev) => ({ ...prev, items: [...prev.items, nextItem] }));
+    setProductSearchByRow((prev) => ({
+      ...prev,
+      [nextItem.id]: ""
+    }));
   }
 
   function removeItemRow(itemId: string) {
@@ -424,11 +503,20 @@ export function PurchasesScreen({
       if (prev.items.length <= 1) return prev;
       return { ...prev, items: prev.items.filter((item) => item.id !== itemId) };
     });
+    setProductSearchByRow((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
   }
 
-  async function savePurchase() {
+  async function savePurchase(nextStatus: PurchaseStatus) {
     if (!form.purchaseDate) {
       alert("Purchase date is required");
+      return;
+    }
+    if (form.items.some((item) => !item.productId)) {
+      alert("Please select a valid product for each line item");
       return;
     }
     if (
@@ -446,7 +534,7 @@ export function PurchasesScreen({
       supplierId: form.supplierId || null,
       referenceNumber: form.referenceNumber,
       notes: form.notes,
-      status: form.status,
+      status: nextStatus,
       items: form.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -461,6 +549,7 @@ export function PurchasesScreen({
     const method = formMode === "edit" ? "PUT" : "POST";
 
     setSaving(true);
+    setSaveAction(nextStatus);
     try {
       const response = await fetch(target, {
         method,
@@ -474,9 +563,16 @@ export function PurchasesScreen({
       }
       setOpen(false);
       await loadPurchases(formMode === "create" ? 1 : pagination.page, query);
-      success(formMode === "edit" ? "Changes saved successfully" : "Purchase added successfully");
+      success(
+        nextStatus === PurchaseStatus.DRAFT
+          ? "Changes saved successfully"
+          : formMode === "edit"
+            ? "Changes saved successfully"
+            : "Purchase added successfully"
+      );
     } finally {
       setSaving(false);
+      setSaveAction(null);
     }
   }
 
@@ -511,13 +607,116 @@ export function PurchasesScreen({
     () => suppliers.filter((supplier) => supplier.status === SupplierStatus.ACTIVE),
     [suppliers]
   );
-  const supplierChoices = useMemo(() => {
-    const selected = suppliers.find((supplier) => supplier.id === form.supplierId);
-    if (!selected || selected.status === SupplierStatus.ACTIVE) {
-      return activeSuppliers;
+  const filteredSupplierChoices = useMemo(() => {
+    const search = supplierPickerQuery.trim().toLowerCase();
+    if (!search) return activeSuppliers;
+    return activeSuppliers.filter((supplier) =>
+      [
+        supplier.supplierName,
+        supplier.contactPerson ?? "",
+        supplier.mobileNumber ?? "",
+        supplier.address ?? ""
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(search)
+    );
+  }, [activeSuppliers, supplierPickerQuery]);
+
+  function openSupplierPicker() {
+    if (readOnly) return;
+    setSupplierPickerQuery("");
+    setSupplierPickerOpen(true);
+  }
+
+  function selectSupplier(supplier: SupplierOption) {
+    setForm((prev) => ({ ...prev, supplierId: supplier.id }));
+    setSupplierSearch(supplierOptionLabel(supplier));
+    setSupplierPickerOpen(false);
+    setSupplierPickerQuery("");
+  }
+
+  function clearSupplierSelection() {
+    setForm((prev) => ({ ...prev, supplierId: "" }));
+    setSupplierSearch("");
+  }
+
+  function updateProductSearch(rowId: string, value: string) {
+    setProductSearchByRow((prev) => ({ ...prev, [rowId]: value }));
+    setProductSearchState({ rowId, highlightedIndex: 0 });
+  }
+
+  function getFilteredProducts(rowId: string) {
+    const currentValue = (productSearchByRow[rowId] ?? "").trim().toLowerCase();
+    const filtered = currentValue
+      ? products.filter((product) =>
+          [product.name, product.sku].join(" ").toLowerCase().includes(currentValue)
+        )
+      : products;
+    return filtered.slice(0, 8);
+  }
+
+  function selectProduct(rowId: string, product: ProductOption) {
+    const duplicateRow = form.items.find((item) => item.id !== rowId && item.productId === product.id);
+    if (duplicateRow) {
+      updateItem(duplicateRow.id, { quantity: duplicateRow.quantity + 1 });
+      removeItemRow(rowId);
+    } else {
+      updateItem(rowId, {
+        productId: product.id,
+        quantity: 1,
+        unitCost: product.unitCost
+      });
+      setProductSearchByRow((prev) => ({
+        ...prev,
+        [rowId]: productOptionLabel(product)
+      }));
     }
-    return [selected, ...activeSuppliers];
-  }, [suppliers, form.supplierId, activeSuppliers]);
+    setProductSearchState({ rowId: null, highlightedIndex: 0 });
+    const isLastRow = form.items[form.items.length - 1]?.id === rowId;
+    if (isLastRow) {
+      addItemRow();
+    }
+  }
+
+  function clearProductSelection(rowId: string) {
+    setProductSearchByRow((prev) => ({ ...prev, [rowId]: "" }));
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item) =>
+        item.id === rowId
+          ? {
+              ...item,
+              productId: "",
+              productName: "",
+              quantity: 1,
+              unitCost: 0,
+              amount: 0,
+              taxAmount: 0,
+              lineTotal: 0
+            }
+          : item
+      )
+    }));
+  }
+
+  function validateProductSearch(rowId: string) {
+    const currentValue = (productSearchByRow[rowId] ?? "").trim();
+    const currentRow = form.items.find((item) => item.id === rowId);
+    const matchedProduct = products.find((product) => productOptionLabel(product) === currentValue);
+    if (matchedProduct && currentRow?.productId !== matchedProduct.id) {
+      selectProduct(rowId, matchedProduct);
+      return;
+    }
+    if (matchedProduct && currentRow?.productId === matchedProduct.id) {
+      setProductSearchState({ rowId: null, highlightedIndex: 0 });
+      return;
+    }
+    if (!currentValue) {
+      clearProductSelection(rowId);
+    }
+    setProductSearchState((prev) => (prev.rowId === rowId ? { rowId: null, highlightedIndex: 0 } : prev));
+  }
 
   return (
     <div className="grid purchases-screen">
@@ -720,114 +919,186 @@ export function PurchasesScreen({
 
       {open ? (
         <div className="inventory-modal-overlay">
-          <div className="inventory-modal purchases-modal">
-            <h3 className="section-title">
-              {formMode === "create" ? "New Purchase" : formMode === "edit" ? "Edit Draft Purchase" : "View Purchase"}
-            </h3>
+          <div className="inventory-modal purchases-modal purchases-dialog">
+            <div className="inventory-modal-header purchases-dialog-header">
+              <div>
+                <h3 className="section-title">
+                  {formMode === "create"
+                    ? "New Purchase"
+                    : formMode === "edit"
+                      ? "Edit Draft Purchase"
+                      : "View Purchase"}
+                </h3>
+              </div>
+            </div>
 
-            <div className="stack">
+            <div className="inventory-modal-body purchases-dialog-body">
               {loadingOptions ? <div className="muted">Loading purchase form options...</div> : null}
-              <div className="grid grid-2">
-                <div className="form-field">
-                  <label className="field-label">Purchase Date</label>
-                  <input
-                    type="date"
-                    value={form.purchaseDate}
-                    disabled={readOnly}
-                    onChange={(event) => setForm((prev) => ({ ...prev, purchaseDate: event.target.value }))}
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="field-label">Status</label>
-                  <select
-                    value={form.status}
-                    disabled={readOnly}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, status: event.target.value as PurchaseStatus }))
-                    }
-                  >
-                    <option value={PurchaseStatus.DRAFT}>Draft</option>
-                    <option value={PurchaseStatus.POSTED}>Posted</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="grid grid-2">
-                <div className="form-field">
-                  <label className="field-label">Supplier</label>
-                  <select
-                    value={form.supplierId}
-                    disabled={readOnly}
-                    onChange={(event) => setForm((prev) => ({ ...prev, supplierId: event.target.value }))}
-                  >
-                    <option value="">Select supplier</option>
-                    {supplierChoices.map((supplier) => (
-                      <option value={supplier.id} key={supplier.id}>
-                        {supplier.supplierName} ({supplier.supplierCode})
-                        {supplier.status === SupplierStatus.INACTIVE ? " - Inactive" : ""}
-                      </option>
-                    ))}
-                  </select>
+              <section className="purchases-section">
+                <div className="purchases-section-head">
+                  <h4 className="section-title">Header</h4>
                 </div>
-                <div className="form-field">
-                  <label className="field-label">Reference No. / Invoice No.</label>
-                  <input
-                    placeholder="Reference number"
-                    value={form.referenceNumber}
-                    disabled={readOnly}
-                    onChange={(event) => setForm((prev) => ({ ...prev, referenceNumber: event.target.value }))}
-                  />
+                <div className="grid grid-2 purchases-header-grid">
+                  <div className="form-field">
+                    <label className="field-label">Supplier</label>
+                    <div className="purchases-supplier-search">
+                      <SearchIcon className="purchases-supplier-search-icon" />
+                      <input
+                        placeholder="Select supplier"
+                        value={supplierSearch}
+                        readOnly
+                        onClick={openSupplierPicker}
+                      />
+                    </div>
+                    {!readOnly && supplierSearch ? (
+                      <button
+                        type="button"
+                        className="purchases-supplier-link"
+                        onClick={clearSupplierSelection}
+                      >
+                        Clear supplier
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="form-field">
+                    <label className="field-label">Purchase Date</label>
+                    <input
+                      type="date"
+                      value={form.purchaseDate}
+                      disabled={readOnly}
+                      onChange={(event) => setForm((prev) => ({ ...prev, purchaseDate: event.target.value }))}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="field-label">Reference No.</label>
+                    <input
+                      placeholder="Reference number"
+                      value={form.referenceNumber}
+                      disabled={readOnly}
+                      onChange={(event) => setForm((prev) => ({ ...prev, referenceNumber: event.target.value }))}
+                    />
+                  </div>
                 </div>
-              </div>
+              </section>
 
-              <div className="form-field">
-                <label className="field-label">Notes</label>
-                <textarea
-                  rows={2}
-                  placeholder="Optional notes"
-                  value={form.notes}
-                  disabled={readOnly}
-                  onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-                />
-              </div>
-
-              <div className="stack">
+              <section className="purchases-section">
                 <div className="row purchases-items-header">
-                  <h4 className="section-title">Purchased Items</h4>
+                  <h4 className="section-title">Line Items</h4>
                   {!readOnly ? (
-                    <SecondaryButton type="button" onClick={addItemRow}>
-                      Add Item
+                    <SecondaryButton type="button" className="purchases-add-item-btn" onClick={addItemRow}>
+                      + Add Item
                     </SecondaryButton>
                   ) : null}
                 </div>
-                <div className="table-wrap">
+                <div className="table-wrap purchases-items-table">
                   <table>
                     <thead>
                       <tr>
                         <th>Product</th>
                         <th>Quantity</th>
                         <th>Unit Cost</th>
-                        <th>Tax Rate</th>
-                        <th>Tax Amount</th>
-                        <th>Line Total</th>
-                        {!readOnly ? <th></th> : null}
+                        <th>Total</th>
+                        {!readOnly ? <th>Actions</th> : null}
                       </tr>
                     </thead>
                     <tbody>
                       {form.items.map((item) => (
                         <tr key={item.id}>
                           <td>
-                            <select
-                              value={item.productId}
-                              disabled={readOnly}
-                              onChange={(event) => updateItem(item.id, { productId: event.target.value })}
-                            >
-                              {products.map((product) => (
-                                <option value={product.id} key={product.id}>
-                                  {product.name} ({product.sku})
-                                </option>
-                              ))}
-                            </select>
+                            {readOnly ? (
+                              <input readOnly className="purchases-computed-input" value={item.productName} />
+                            ) : (
+                              <div
+                                className={`purchases-product-search ${
+                                  productSearchState.rowId === item.id ? "active" : ""
+                                }`}
+                              >
+                                <SearchIcon className="purchases-product-search-icon" />
+                                <input
+                                  placeholder="Search product by name or SKU"
+                                  value={productSearchByRow[item.id] ?? ""}
+                                  onChange={(event) => updateProductSearch(item.id, event.target.value)}
+                                  onFocus={() => setProductSearchState({ rowId: item.id, highlightedIndex: 0 })}
+                                  onBlur={() => validateProductSearch(item.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      const results = getFilteredProducts(item.id);
+                                      const highlighted =
+                                        results[
+                                          Math.min(productSearchState.highlightedIndex, Math.max(results.length - 1, 0))
+                                        ];
+                                      if (highlighted) {
+                                        selectProduct(item.id, highlighted);
+                                      }
+                                    }
+                                    if (event.key === "ArrowDown") {
+                                      event.preventDefault();
+                                      const results = getFilteredProducts(item.id);
+                                      setProductSearchState((prev) => ({
+                                        rowId: item.id,
+                                        highlightedIndex: Math.min(
+                                          prev.rowId === item.id ? prev.highlightedIndex + 1 : 0,
+                                          Math.max(results.length - 1, 0)
+                                        )
+                                      }));
+                                    }
+                                    if (event.key === "ArrowUp") {
+                                      event.preventDefault();
+                                      setProductSearchState((prev) => ({
+                                        rowId: item.id,
+                                        highlightedIndex: Math.max(
+                                          (prev.rowId === item.id ? prev.highlightedIndex : 0) - 1,
+                                          0
+                                        )
+                                      }));
+                                    }
+                                  }}
+                                />
+                                {productSearchByRow[item.id] ? (
+                                  <button
+                                    type="button"
+                                    className="purchases-product-clear-btn"
+                                    onClick={() => clearProductSelection(item.id)}
+                                    aria-label="Clear product"
+                                  >
+                                    ×
+                                  </button>
+                                ) : null}
+                                {productSearchState.rowId === item.id ? (
+                                  <div className="purchases-product-results">
+                                    {getFilteredProducts(item.id).length ? (
+                                      getFilteredProducts(item.id).map((product, index) => (
+                                        <button
+                                          key={product.id}
+                                          type="button"
+                                          className={`purchases-product-result ${
+                                            index === productSearchState.highlightedIndex ? "active" : ""
+                                          }`}
+                                          onMouseDown={(event) => {
+                                            event.preventDefault();
+                                            selectProduct(item.id, product);
+                                          }}
+                                        >
+                                          <span className="purchases-product-result-main">
+                                            {product.name}
+                                          </span>
+                                          <span className="purchases-product-result-meta">
+                                            {product.sku}
+                                          </span>
+                                          <span className="purchases-product-result-cost">
+                                            Last cost: {formatMoney(product.unitCost)}
+                                          </span>
+                                        </button>
+                                      ))
+                                    ) : (
+                                      <div className="purchases-product-empty">No matching products found.</div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <input
@@ -858,35 +1129,14 @@ export function PurchasesScreen({
                           <td>
                             <input
                               type="text"
-                              inputMode="decimal"
-                              pattern="[0-9]*[.]?[0-9]*"
-                              disabled={readOnly}
-                              value={item.taxRate.toString()}
-                              onChange={(event) => {
-                                const next = sanitizeDecimalInput(event.target.value);
-                                updateItem(item.id, { taxRate: toNumber(next) });
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
                               readOnly
                               className="purchases-computed-input"
-                              value={formatMoney(item.taxAmount)}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              readOnly
-                              className="purchases-computed-input"
-                              value={formatMoney(item.lineTotal)}
+                              value={formatMoney(item.amount)}
                             />
                           </td>
                           {!readOnly ? (
                             <td>
-                              <button className="btn-danger" onClick={() => removeItemRow(item.id)}>
+                              <button className="btn-danger purchases-remove-btn" onClick={() => removeItemRow(item.id)}>
                                 Remove
                               </button>
                             </td>
@@ -896,35 +1146,143 @@ export function PurchasesScreen({
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </section>
 
-              <div className="card purchases-summary">
-                <div>
-                  <span>Total Items</span>
-                  <strong>{formatNumber(summary.totalItems)}</strong>
+              <section className="card purchases-summary purchases-summary-card">
+                <div className="purchases-summary-head">
+                  <h4 className="section-title">Summary</h4>
+                  <span className="muted">{formatNumber(summary.totalItems)} item(s)</span>
                 </div>
                 <div>
                   <span>Subtotal</span>
                   <strong>{formatMoney(summary.subtotal)}</strong>
                 </div>
                 <div>
-                  <span>Total Tax</span>
+                  <span>Tax</span>
                   <strong>{formatMoney(summary.totalTax)}</strong>
                 </div>
-                <div>
+                <div className="purchases-summary-grand">
                   <span>Grand Total</span>
                   <strong>{formatMoney(summary.grandTotal)}</strong>
                 </div>
-              </div>
+              </section>
+
+              {readOnly || remarksOpen || form.notes.trim() ? (
+                <section className="purchases-section purchases-remarks-section">
+                  <button
+                    type="button"
+                    className="purchases-remarks-toggle"
+                    onClick={() => setRemarksOpen((prev) => !prev)}
+                  >
+                    {remarksOpen ? "Hide Remarks" : "+ Add Remarks"}
+                  </button>
+                  {remarksOpen ? (
+                    <div className="form-field">
+                      <label className="field-label">Remarks</label>
+                      <textarea
+                        rows={3}
+                        placeholder="Optional remarks"
+                        value={form.notes}
+                        disabled={readOnly}
+                        onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
+                      />
+                    </div>
+                  ) : null}
+                </section>
+              ) : (
+                <section className="purchases-section purchases-remarks-section">
+                  <button
+                    type="button"
+                    className="purchases-remarks-toggle"
+                    onClick={() => setRemarksOpen(true)}
+                  >
+                    + Add Remarks
+                  </button>
+                </section>
+              )}
             </div>
 
-            <div className="row" style={{ marginTop: 12 }}>
+            <div className="inventory-modal-footer purchases-dialog-footer">
               <SecondaryButton onClick={() => setOpen(false)}>Cancel</SecondaryButton>
               {!readOnly ? (
-                <PrimaryButton onClick={savePurchase} disabled={saving}>
-                  {saving ? "Saving..." : "Save Purchase"}
-                </PrimaryButton>
+                <>
+                  <SecondaryButton onClick={() => void savePurchase(PurchaseStatus.DRAFT)} disabled={saving}>
+                    {saving && saveAction === PurchaseStatus.DRAFT ? "Saving..." : "Save Draft"}
+                  </SecondaryButton>
+                  <PrimaryButton onClick={() => void savePurchase(PurchaseStatus.POSTED)} disabled={saving}>
+                    {saving && saveAction === PurchaseStatus.POSTED ? "Posting..." : "Post Purchase"}
+                  </PrimaryButton>
+                </>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {supplierPickerOpen ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal purchases-supplier-picker">
+            <div className="inventory-modal-header">
+              <h3 className="section-title">Select Supplier</h3>
+            </div>
+            <div className="inventory-modal-body purchases-supplier-picker-body">
+              <input
+                className="inventory-search"
+                placeholder="Search supplier..."
+                value={supplierPickerQuery}
+                onChange={(event) => setSupplierPickerQuery(event.target.value)}
+                autoFocus
+              />
+              <div className="table-wrap purchases-supplier-picker-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Supplier Name</th>
+                      <th>Contact Person</th>
+                      <th>Contact Number</th>
+                      <th>Address</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSupplierChoices.length ? (
+                      filteredSupplierChoices.map((supplier) => (
+                        <tr
+                          key={supplier.id}
+                          className="purchases-supplier-row"
+                          onClick={() => selectSupplier(supplier)}
+                        >
+                          <td>{supplier.supplierName}</td>
+                          <td>{supplier.contactPerson || "-"}</td>
+                          <td>{supplier.mobileNumber || "-"}</td>
+                          <td>{supplier.address || "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectSupplier(supplier);
+                              }}
+                            >
+                              Select
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="muted">
+                          No active suppliers found.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="inventory-modal-footer">
+              <SecondaryButton onClick={() => setSupplierPickerOpen(false)}>Close</SecondaryButton>
             </div>
           </div>
         </div>

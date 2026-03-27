@@ -19,6 +19,7 @@ export async function GET() {
       "Product Name": "Sample Product",
       Category: "General",
       Description: "Sample description",
+      "Unit Cost": 80,
       Price: 100,
       "Current Stock": 25,
       "Compatible Units": "",

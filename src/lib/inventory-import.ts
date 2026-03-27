@@ -7,6 +7,7 @@ export const inventoryImportColumns = [
   "Product Name",
   "Category",
   "Description",
+  "Unit Cost",
   "Price",
   "Current Stock",
   "Compatible Units",
@@ -19,6 +20,7 @@ export type InventoryImportPreviewRow = {
   name: string;
   category: string;
   description: string;
+  unitCost: number | null;
   price: number | null;
   stockQty: number | null;
   compatibleUnits: string;
@@ -27,6 +29,7 @@ export type InventoryImportPreviewRow = {
 };
 
 export type InventoryImportValidatedRow = InventoryImportPreviewRow & {
+  unitCost: number;
   price: number;
   stockQty: number;
   categoryId: string | null;
@@ -98,6 +101,7 @@ export async function validateInventoryImportRows(
     const name = toText(getCell(row, ["Product Name", "Name"]));
     const categoryInput = toText(getCell(row, ["Category", "Category Code"]));
     const description = toText(getCell(row, ["Description"]));
+    const unitCost = toNumber(getCell(row, ["Unit Cost", "Cost", "Cost Price"]));
     const price = toNumber(getCell(row, ["Price", "Selling Price"]));
     const stockQty = toNumber(getCell(row, ["Current Stock", "Stock", "Initial Stock"]));
     const compatibleUnits = toText(getCell(row, ["Compatible Units"]));
@@ -107,8 +111,10 @@ export async function validateInventoryImportRows(
 
     if (!sku) errors.push("SKU is required");
     if (!name) errors.push("Product Name is required");
+    if (unitCost == null) errors.push("Unit Cost must be a valid number");
     if (price == null) errors.push("Price must be a valid number");
     if (stockQty == null) errors.push("Current Stock must be a valid number");
+    if (unitCost != null && unitCost < 0) errors.push("Unit Cost cannot be negative");
     if (stockQty != null && stockQty < 0) errors.push("Current Stock cannot be negative");
     if (price != null && price < 0) errors.push("Price cannot be negative");
     if (settings.enableProductCategories && !categoryInput) {
@@ -132,6 +138,7 @@ export async function validateInventoryImportRows(
       name,
       category: matchedCategory?.name ?? categoryInput,
       description,
+      unitCost,
       price,
       stockQty,
       compatibleUnits,
@@ -175,6 +182,7 @@ export async function validateInventoryImportRows(
     name: row.name,
     category: row.category,
     description: row.description,
+    unitCost: row.unitCost,
     price: row.price,
     stockQty: row.stockQty,
     compatibleUnits: row.compatibleUnits,
@@ -192,6 +200,7 @@ export async function validateInventoryImportRows(
       categoryId: row.categoryId,
       categoryName: row.category || "General",
       description: row.description,
+      unitCost: row.unitCost ?? 0,
       price: row.price ?? 0,
       stockQty: row.stockQty ?? 0,
       compatibleUnits: row.compatibleUnits,
@@ -208,6 +217,7 @@ export function toInventoryExportRows(
     name: string;
     category: string;
     description: string | null;
+    unitCost: Prisma.Decimal | number;
     sellingPrice: Prisma.Decimal | number;
     stockQty: Prisma.Decimal | number;
     compatibleUnits: string | null;
@@ -219,10 +229,10 @@ export function toInventoryExportRows(
     "Product Name": product.name,
     Category: product.category,
     Description: product.description ?? "",
+    "Unit Cost": Number(product.unitCost),
     Price: Number(product.sellingPrice),
     "Current Stock": Number(product.stockQty),
     "Compatible Units": product.compatibleUnits ?? "",
     "Active Status": product.isActive ? "Active" : "Inactive"
   }));
 }
-

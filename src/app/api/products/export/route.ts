@@ -20,6 +20,7 @@ export async function GET() {
       name: true,
       category: true,
       description: true,
+      unitCost: true,
       sellingPrice: true,
       stockQty: true,
       compatibleUnits: true,

@@ -1,7 +1,9 @@
-import { PurchaseStatus, StockMovementType } from "@prisma/client";
+import { InventoryReferenceType, PurchaseStatus } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { getAuthUser } from "@/lib/api-auth";
 import { badRequest, ok, serverError, unauthorized } from "@/lib/http";
+import { getInventorySettings } from "@/lib/inventory-settings";
+import { applyPurchaseReceipt } from "@/lib/inventory-valuation";
 import { isVoidedPurchaseNote } from "@/lib/purchase-utils";
 import { prisma } from "@/lib/prisma";
 
@@ -123,6 +125,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
+    const inventorySettings = await getInventorySettings();
     const existing = await prisma.purchase.findUnique({
       where: { id },
       include: { items: true }
@@ -212,19 +215,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
       if (status === PurchaseStatus.POSTED) {
         for (const item of normalizedItems) {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: { stockQty: { increment: item.quantity } }
-          });
-          await tx.stockMovement.create({
-            data: {
-              type: StockMovementType.STOCK_IN,
-              productId: item.productId,
-              qtyDelta: item.quantity,
-              reason: `Purchase ${existing.purchaseNumber}`,
-              refId: purchase.id,
-              userId: actor.id
-            }
+          await applyPurchaseReceipt(tx, {
+            productId: item.productId,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            reason: `Purchase ${existing.purchaseNumber}`,
+            referenceId: purchase.id,
+            referenceType: InventoryReferenceType.PURCHASE,
+            userId: actor.id,
+            method: inventorySettings.inventoryValuationMethod
           });
         }
       }

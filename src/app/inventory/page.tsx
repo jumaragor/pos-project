@@ -22,6 +22,7 @@ export default async function InventoryPage() {
         barcode: true,
         photoUrl: true,
         unit: true,
+        unitCost: true,
         sellingPrice: true,
         costPrice: true,
         stockQty: true,
@@ -38,7 +39,7 @@ export default async function InventoryPage() {
     }),
     prisma.product.findMany({
       where: { isActive: true },
-      select: { category: true, stockQty: true, costPrice: true }
+      select: { category: true, stockQty: true, unitCost: true }
     }),
     getInventorySettings()
   ]);
@@ -56,6 +57,7 @@ export default async function InventoryPage() {
           barcode: product.barcode ?? "",
           photoUrl: product.photoUrl ?? null,
           unit: product.unit,
+          unitCost: Number(product.unitCost),
           sellingPrice: Number(product.sellingPrice),
           costPrice: Number(product.costPrice),
           stockQty: Number(product.stockQty),
@@ -71,7 +73,7 @@ export default async function InventoryPage() {
             : 0,
           availableCategories: new Set(statsRows.map((item) => item.category).filter(Boolean)).size,
           inventoryValue: statsRows.reduce(
-            (sum, item) => sum + Math.max(0, Number(item.stockQty)) * Math.max(0, Number(item.costPrice)),
+            (sum, item) => sum + Math.max(0, Number(item.stockQty)) * Math.max(0, Number(item.unitCost)),
             0
           )
         }}

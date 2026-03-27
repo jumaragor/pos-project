@@ -1,0 +1,5 @@
+ALTER TABLE "Product"
+ADD COLUMN "unitCost" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+UPDATE "Product"
+SET "unitCost" = CAST("costPrice" AS DOUBLE PRECISION);

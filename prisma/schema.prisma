@@ -46,6 +46,18 @@ enum PendingOpType {
   REPACK
 }
 
+enum InventoryValuationMethod {
+  STANDARD
+  FIFO
+}
+
+enum InventoryReferenceType {
+  PURCHASE
+  SALE
+  ADJUSTMENT
+  REPACK
+}
+
 enum PurchaseStatus {
   DRAFT
   POSTED
@@ -87,6 +99,7 @@ model Product {
   unit              String
   barcode           String?           @unique
   photoUrl          String?
+  unitCost          Float             @default(0)
   costPrice         Decimal           @db.Decimal(12, 2)
   sellingPrice      Decimal           @db.Decimal(12, 2)
   stockQty          Decimal           @db.Decimal(12, 3)
@@ -99,6 +112,7 @@ model Product {
   items             TransactionItem[]
   purchaseItems     PurchaseItem[]
   stockMoves        StockMovement[]
+  inventoryLayers   InventoryLayer[]
   conversionRules   UnitConversionRule[]
 }
 
@@ -153,16 +167,29 @@ model TransactionItem {
 }
 
 model StockMovement {
-  id        String            @id @default(cuid())
-  type      StockMovementType
-  productId String
-  qtyDelta  Decimal           @db.Decimal(12, 3)
-  reason    String?
-  refId     String?
-  userId    String
-  createdAt DateTime          @default(now())
-  product   Product           @relation(fields: [productId], references: [id])
-  user      User              @relation(fields: [userId], references: [id])
+  id            String                 @id @default(cuid())
+  type          StockMovementType
+  productId     String
+  qtyDelta      Decimal                @db.Decimal(12, 3)
+  unitCost      Decimal?               @db.Decimal(12, 2)
+  reason        String?
+  refId         String?
+  referenceType InventoryReferenceType?
+  userId        String
+  createdAt     DateTime               @default(now())
+  product       Product                @relation(fields: [productId], references: [id])
+  user          User                   @relation(fields: [userId], references: [id])
+}
+
+model InventoryLayer {
+  id            String                 @id @default(cuid())
+  productId     String
+  remainingQty  Decimal                @db.Decimal(12, 3)
+  unitCost      Decimal                @db.Decimal(12, 2)
+  referenceId   String?
+  referenceType InventoryReferenceType?
+  createdAt     DateTime               @default(now())
+  product       Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model UnitConversionRule {

@@ -186,10 +186,9 @@ export function SuppliersScreen({
           </PrimaryButton>
         </div>
         <div className="inventory-filters">
-          <div className="muted">Maintain your supplier master list for purchases and restocking.</div>
           <input
             className="inventory-search"
-            placeholder="Search code, supplier, contact, mobile, email..."
+            placeholder="Search suppliers..."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

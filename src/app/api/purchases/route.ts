@@ -1,7 +1,9 @@
-import { PurchaseStatus, StockMovementType } from "@prisma/client";
+import { InventoryReferenceType, PurchaseStatus } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { getAuthUser } from "@/lib/api-auth";
 import { badRequest, created, ok, serverError, unauthorized } from "@/lib/http";
+import { getInventorySettings } from "@/lib/inventory-settings";
+import { applyPurchaseReceipt } from "@/lib/inventory-valuation";
 import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
 import { PURCHASE_VOID_MARKER } from "@/lib/purchase-utils";
 import { prisma } from "@/lib/prisma";
@@ -152,6 +154,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    const inventorySettings = await getInventorySettings();
     const status = toStatus(body.status);
     const purchaseDate = parsePurchaseDate(body.purchaseDate);
     const items = parseItems(body.items);
@@ -225,19 +228,15 @@ export async function POST(request: NextRequest) {
 
       if (status === PurchaseStatus.POSTED) {
         for (const item of normalizedItems) {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: { stockQty: { increment: item.quantity } }
-          });
-          await tx.stockMovement.create({
-            data: {
-              type: StockMovementType.STOCK_IN,
-              productId: item.productId,
-              qtyDelta: item.quantity,
-              reason: `Purchase ${purchaseNumber}`,
-              refId: createdPurchase.id,
-              userId: actor.id
-            }
+          await applyPurchaseReceipt(tx, {
+            productId: item.productId,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            reason: `Purchase ${purchaseNumber}`,
+            referenceId: createdPurchase.id,
+            referenceType: InventoryReferenceType.PURCHASE,
+            userId: actor.id,
+            method: inventorySettings.inventoryValuationMethod
           });
         }
       }

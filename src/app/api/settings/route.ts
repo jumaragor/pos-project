@@ -11,6 +11,7 @@ const defaultSettings: Record<string, string> = {
   allowManualStockAdjustments: "true",
   allowProductDeletion: "false",
   enableLowStockAlerts: "true",
+  inventoryValuationMethod: "STANDARD",
   enableTax: "true",
   defaultTaxRate: "12",
   taxLabel: "VAT",

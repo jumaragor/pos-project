@@ -1,4 +1,11 @@
-import { PendingOpType, Prisma, Role, StockMovementType } from "@prisma/client";
+import {
+  InventoryReferenceType,
+  PendingOpType,
+  Prisma,
+  Role,
+  StockMovementType
+} from "@prisma/client";
+import { applyInventoryAdjustment, applyPurchaseReceipt } from "@/lib/inventory-valuation";
 import { prisma } from "@/lib/prisma";
 import { assertPermission } from "@/lib/rbac";
 import { getInventorySettings } from "@/lib/inventory-settings";
@@ -6,26 +13,32 @@ import { getInventorySettings } from "@/lib/inventory-settings";
 export async function stockInProduct(params: {
   productId: string;
   qty: number;
+  unitCost?: number;
   reason?: string;
   userId: string;
 }) {
+  const settings = await getInventorySettings();
   return prisma.$transaction(async (tx) => {
     const product = await tx.product.findUnique({ where: { id: params.productId } });
     if (!product) {
       throw new Error("Product not found");
     }
-    await tx.product.update({
-      where: { id: product.id },
-      data: { stockQty: { increment: params.qty } }
+    await applyPurchaseReceipt(tx, {
+      productId: product.id,
+      quantity: params.qty,
+      unitCost: params.unitCost ?? product.unitCost,
+      reason: params.reason ?? "Stock in",
+      referenceType: InventoryReferenceType.ADJUSTMENT,
+      userId: params.userId,
+      method: settings.inventoryValuationMethod
     });
-    return tx.stockMovement.create({
-      data: {
-        type: StockMovementType.STOCK_IN,
+    return tx.stockMovement.findFirstOrThrow({
+      where: {
         productId: product.id,
-        qtyDelta: params.qty,
-        reason: params.reason ?? "Stock in",
-        userId: params.userId
-      }
+        userId: params.userId,
+        type: StockMovementType.STOCK_IN
+      },
+      orderBy: { createdAt: "desc" }
     });
   });
 }
@@ -51,9 +64,13 @@ export async function adjustStock(params: {
     if (!settings.allowNegativeStock && next < 0) {
       throw new Error("Insufficient stock");
     }
-    await tx.product.update({
-      where: { id: product.id },
-      data: { stockQty: { increment: params.qtyDelta } }
+    await applyInventoryAdjustment(tx, {
+      productId: product.id,
+      quantity: params.qtyDelta,
+      reason: params.reason,
+      referenceType: InventoryReferenceType.ADJUSTMENT,
+      userId: params.userId,
+      method: settings.inventoryValuationMethod
     });
     await tx.auditLog.create({
       data: {
@@ -64,14 +81,13 @@ export async function adjustStock(params: {
         metadataJson: { qtyDelta: params.qtyDelta, reason: params.reason }
       }
     });
-    return tx.stockMovement.create({
-      data: {
-        type: StockMovementType.ADJUSTMENT,
+    return tx.stockMovement.findFirstOrThrow({
+      where: {
         productId: product.id,
-        qtyDelta: params.qtyDelta,
-        reason: params.reason,
-        userId: params.userId
-      }
+        userId: params.userId,
+        type: StockMovementType.ADJUSTMENT
+      },
+      orderBy: { createdAt: "desc" }
     });
   });
 }
@@ -112,7 +128,9 @@ export async function repackStock(params: {
         type: StockMovementType.REPACK_OUT,
         productId: source.id,
         qtyDelta: -params.sourceQty,
+        unitCost: source.unitCost,
         reason: params.reason ?? "Repack",
+        referenceType: InventoryReferenceType.REPACK,
         userId: params.userId
       }
     });
@@ -121,7 +139,9 @@ export async function repackStock(params: {
         type: StockMovementType.REPACK_IN,
         productId: target.id,
         qtyDelta: targetQty,
+        unitCost: target.unitCost,
         reason: params.reason ?? "Repack",
+        referenceType: InventoryReferenceType.REPACK,
         userId: params.userId
       }
     });

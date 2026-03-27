@@ -69,6 +69,7 @@ type SettingsShape = {
   allowManualStockAdjustments: boolean;
   allowProductDeletion: boolean;
   enableLowStockAlerts: boolean;
+  inventoryValuationMethod: "STANDARD" | "FIFO";
   enableTax: boolean;
   defaultTaxRate: number;
   taxLabel: string;
@@ -124,6 +125,7 @@ const defaultSettings: SettingsShape = {
   allowManualStockAdjustments: true,
   allowProductDeletion: false,
   enableLowStockAlerts: true,
+  inventoryValuationMethod: "STANDARD",
   enableTax: true,
   defaultTaxRate: 12,
   taxLabel: "VAT",
@@ -587,6 +589,21 @@ export function ConfigurationScreen() {
             <label className="configuration-check"><input type="checkbox" checked={settings.allowManualStockAdjustments} onChange={(e) => setSettings((p) => ({ ...p, allowManualStockAdjustments: e.target.checked }))} />Allow Manual Stock Adjustments</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowProductDeletion} onChange={(e) => setSettings((p) => ({ ...p, allowProductDeletion: e.target.checked }))} />Allow Product Deletion</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.enableLowStockAlerts} onChange={(e) => setSettings((p) => ({ ...p, enableLowStockAlerts: e.target.checked }))} />Enable Low Stock Alerts</label>
+            <label className="form-field">
+              <span className="field-label">Inventory Valuation Method</span>
+              <select
+                value={settings.inventoryValuationMethod}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    inventoryValuationMethod: e.target.value as SettingsShape["inventoryValuationMethod"]
+                  }))
+                }
+              >
+                <option value="STANDARD">STANDARD</option>
+                <option value="FIFO">FIFO</option>
+              </select>
+            </label>
             <div className="configuration-actions">
               <PrimaryButton
                 className="configuration-save-btn"
@@ -596,7 +613,8 @@ export function ConfigurationScreen() {
                     "lowStockThreshold",
                     "allowManualStockAdjustments",
                     "allowProductDeletion",
-                    "enableLowStockAlerts"
+                    "enableLowStockAlerts",
+                    "inventoryValuationMethod"
                   ])
                 }
               >

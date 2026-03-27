@@ -28,7 +28,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const body = await request.json();
     const settings = await getProductSettings();
     if (
-      (typeof body.costPrice === "number" || typeof body.sellingPrice === "number") &&
+      (typeof body.unitCost === "number" ||
+        typeof body.costPrice === "number" ||
+        typeof body.sellingPrice === "number") &&
       !can(actor.role, "EDIT_PRICING")
     ) {
       return forbidden();
@@ -61,6 +63,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return badRequest("SKU is required");
     }
     const normalizedBarcode = normalizeOptionalText(body.barcode);
+    const unitCost =
+      typeof body.unitCost === "number"
+        ? body.unitCost
+        : typeof body.costPrice === "number"
+          ? body.costPrice
+          : Number(existingProduct.costPrice);
     const product = await prisma.product.update({
       where: { id },
       data: {
@@ -75,7 +83,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
         categoryId: settings.enableProductCategories ? categoryId : existingProduct.categoryId,
         category: settings.enableProductCategories ? category?.name ?? existingProduct.category : existingProduct.category,
         unit: body.unit,
-        costPrice: body.costPrice,
+        unitCost,
+        costPrice: unitCost,
         sellingPrice: body.sellingPrice,
         stockQty: body.stockQty,
         allowNegativeStock: body.allowNegativeStock,
@@ -83,14 +92,22 @@ export async function PUT(request: NextRequest, { params }: Params) {
         lowStockThreshold: body.lowStockThreshold
       }
     });
-    if (typeof body.costPrice === "number" || typeof body.sellingPrice === "number") {
+    if (
+      typeof body.unitCost === "number" ||
+      typeof body.costPrice === "number" ||
+      typeof body.sellingPrice === "number"
+    ) {
       await prisma.auditLog.create({
         data: {
           actorUserId: actor.id,
           action: "PRICE_EDIT",
           entityType: "Product",
           entityId: id,
-          metadataJson: { costPrice: body.costPrice, sellingPrice: body.sellingPrice }
+          metadataJson: {
+            unitCost,
+            costPrice: unitCost,
+            sellingPrice: body.sellingPrice
+          }
         }
       });
     }

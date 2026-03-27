@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
         ? { category: sortDir }
         : sortKey === "stockQty"
           ? { stockQty: sortDir }
+          : sortKey === "unitCost"
+            ? { unitCost: sortDir }
           : sortKey === "sellingPrice"
             ? { sellingPrice: sortDir }
             : { name: sortDir };
@@ -67,6 +69,7 @@ export async function GET(request: NextRequest) {
         barcode: true,
         photoUrl: true,
         unit: true,
+        unitCost: true,
         sellingPrice: true,
         costPrice: true,
         stockQty: true,
@@ -77,7 +80,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.product.findMany({
       where: activeWhere,
-      select: { category: true, stockQty: true, costPrice: true }
+      select: { category: true, stockQty: true, unitCost: true }
     }),
     prisma.product.findMany({
       where: activeWhere,
@@ -93,7 +96,7 @@ export async function GET(request: NextRequest) {
       : 0,
     availableCategories: new Set(statsRows.map((item) => item.category).filter(Boolean)).size,
     inventoryValue: statsRows.reduce(
-      (sum, item) => sum + Math.max(0, Number(item.stockQty)) * Math.max(0, Number(item.costPrice)),
+      (sum, item) => sum + Math.max(0, Number(item.stockQty)) * Math.max(0, Number(item.unitCost)),
       0
     )
   };
@@ -105,6 +108,7 @@ export async function GET(request: NextRequest) {
       compatibleUnits: product.compatibleUnits ?? "",
       barcode: product.barcode ?? "",
       photoUrl: product.photoUrl ?? null,
+      unitCost: Number(product.unitCost),
       sellingPrice: Number(product.sellingPrice),
       costPrice: Number(product.costPrice),
       stockQty: Number(product.stockQty),
@@ -127,8 +131,14 @@ export async function POST(request: NextRequest) {
     if (!body.name || !body.unit) {
       return badRequest("name and unit are required");
     }
-    if ((body.costPrice || body.sellingPrice) && !can(actor.role, "EDIT_PRICING")) {
-      return forbidden();
+    if (
+      typeof body.unitCost === "number" ||
+      typeof body.costPrice === "number" ||
+      typeof body.sellingPrice === "number"
+    ) {
+      if (!can(actor.role, "EDIT_PRICING")) {
+        return forbidden();
+      }
     }
     const categoryId = typeof body.categoryId === "string" && body.categoryId.trim() ? body.categoryId : null;
     const category = categoryId
@@ -155,6 +165,7 @@ export async function POST(request: NextRequest) {
       return badRequest("SKU is required");
     }
     const normalizedBarcode = normalizeOptionalText(body.barcode);
+    const unitCost = Number(body.unitCost ?? body.costPrice ?? 0);
     const product = await prisma.product.create({
       data: {
         name: body.name,
@@ -166,7 +177,8 @@ export async function POST(request: NextRequest) {
         categoryId: settings.enableProductCategories ? categoryId : null,
         category: settings.enableProductCategories ? category?.name ?? "General" : "General",
         unit: body.unit,
-        costPrice: Number(body.costPrice ?? 0),
+        unitCost,
+        costPrice: unitCost,
         sellingPrice: Number(body.sellingPrice ?? 0),
         stockQty: Number(body.stockQty ?? 0),
         allowNegativeStock: Boolean(body.allowNegativeStock ?? false),

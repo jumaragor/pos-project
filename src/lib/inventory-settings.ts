@@ -6,6 +6,7 @@ export type InventorySettings = {
   allowManualStockAdjustments: boolean;
   allowProductDeletion: boolean;
   enableLowStockAlerts: boolean;
+  inventoryValuationMethod: "STANDARD" | "FIFO";
 };
 
 export const defaultInventorySettings: InventorySettings = {
@@ -13,7 +14,8 @@ export const defaultInventorySettings: InventorySettings = {
   lowStockThreshold: 10,
   allowManualStockAdjustments: true,
   allowProductDeletion: false,
-  enableLowStockAlerts: true
+  enableLowStockAlerts: true,
+  inventoryValuationMethod: "STANDARD"
 };
 const SETTINGS_TTL_MS = 30_000;
 let inventorySettingsCache:
@@ -45,7 +47,8 @@ export async function getInventorySettings(): Promise<InventorySettings> {
           "lowStockThreshold",
           "allowManualStockAdjustments",
           "allowProductDeletion",
-          "enableLowStockAlerts"
+          "enableLowStockAlerts",
+          "inventoryValuationMethod"
         ]
       }
     }
@@ -73,7 +76,11 @@ export async function getInventorySettings(): Promise<InventorySettings> {
     enableLowStockAlerts: parseBoolean(
       byKey.get("enableLowStockAlerts"),
       defaultInventorySettings.enableLowStockAlerts
-    )
+    ),
+    inventoryValuationMethod:
+      byKey.get("inventoryValuationMethod") === "FIFO"
+        ? "FIFO"
+        : defaultInventorySettings.inventoryValuationMethod
   };
   inventorySettingsCache = {
     value,

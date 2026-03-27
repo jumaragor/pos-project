@@ -1,10 +1,11 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { useToast } from "@/components/toast-provider";
+import { MoreVerticalIcon, PencilIcon } from "@/components/ui/app-icons";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   normalizeDecimalInput,
@@ -25,6 +26,7 @@ type ProductRow = {
   barcode?: string | null;
   photoUrl: string | null;
   unit: string;
+  unitCost: number;
   sellingPrice: number;
   costPrice: number;
   stockQty: number;
@@ -57,6 +59,7 @@ type InventoryImportPreviewRow = {
   name: string;
   category: string;
   description: string;
+  unitCost: number | null;
   price: number | null;
   stockQty: number | null;
   compatibleUnits: string;
@@ -68,8 +71,20 @@ type InventoryImportSummary = {
   successfulRows: number;
   failedRows: number;
 };
+type ProductHistoryRow = {
+  id: string;
+  date: string;
+  type: string;
+  quantityChange: number;
+  reference: string;
+};
+type ActionsMenuState = {
+  productId: string;
+  top: number;
+  left: number;
+};
 
-type SortKey = "name" | "sku" | "category" | "stockQty" | "sellingPrice";
+type SortKey = "name" | "sku" | "category" | "stockQty" | "unitCost" | "sellingPrice";
 type InventoryFilter = "active" | "archived" | "all";
 type ProductBehaviorSettings = {
   enableProductCategories: boolean;
@@ -133,6 +148,7 @@ export function InventoryScreen({
   const [editOpen, setEditOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [activeProduct, setActiveProduct] = useState<ProductRow | null>(null);
   const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoPreview, setCreatePhotoPreview] = useState<string | null>(null);
@@ -152,6 +168,7 @@ export function InventoryScreen({
     compatibleUnits: "",
     barcode: "",
     unit: "pc",
+    unitCost: 0,
     costPrice: 0,
     sellingPrice: 0,
     stockQty: 0,
@@ -160,6 +177,7 @@ export function InventoryScreen({
     lowStockThreshold: 0
   });
   const [createQtyInput, setCreateQtyInput] = useState("0");
+  const [createUnitCostInput, setCreateUnitCostInput] = useState("0.00");
   const [createPriceInput, setCreatePriceInput] = useState("0.00");
   const [adjustQtyInput, setAdjustQtyInput] = useState("0");
   const [adjustReason, setAdjustReason] = useState("");
@@ -171,21 +189,26 @@ export function InventoryScreen({
   const [importRawRows, setImportRawRows] = useState<Array<Record<string, unknown>>>([]);
   const [importingPreview, setImportingPreview] = useState(false);
   const [importingRows, setImportingRows] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRows, setHistoryRows] = useState<ProductHistoryRow[]>([]);
+  const [actionsMenuState, setActionsMenuState] = useState<ActionsMenuState | null>(null);
   const createPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const anyModalOpen = createOpen || editOpen || cameraOpen || adjustOpen || importOpen;
+    const anyModalOpen =
+      createOpen || editOpen || cameraOpen || adjustOpen || importOpen || historyOpen;
     if (!anyModalOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [adjustOpen, cameraOpen, createOpen, editOpen, importOpen]);
+  }, [adjustOpen, cameraOpen, createOpen, editOpen, historyOpen, importOpen]);
 
   useEffect(() => {
     setCameraSupported(
@@ -204,6 +227,30 @@ export function InventoryScreen({
       }
     };
   }, [cameraCapturedPreview]);
+
+  useEffect(() => {
+    function handleClickOutside(event: globalThis.MouseEvent) {
+      if (!actionsMenuRef.current) return;
+      if (actionsMenuRef.current.contains(event.target as Node)) return;
+      setActionsMenuState(null);
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    function handleViewportChange() {
+      setActionsMenuState(null);
+    }
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (!productSettings.enableProductCategories) {
@@ -460,6 +507,38 @@ export function InventoryScreen({
     }
   }
 
+  async function openHistory(product: ProductRow) {
+    setActiveProduct(product);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    setHistoryOpen(true);
+    try {
+      const response = await fetch(`/api/inventory/history?productId=${encodeURIComponent(product.id)}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        alert(payload.error ?? "Failed to load product history");
+        setHistoryOpen(false);
+        return;
+      }
+      setHistoryRows((payload.items ?? []) as ProductHistoryRow[]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  function toggleActionsMenu(event: ReactMouseEvent<HTMLButtonElement>, productId: string) {
+    const buttonRect = event.currentTarget.getBoundingClientRect();
+    setActionsMenuState((current) =>
+      current?.productId === productId
+        ? null
+        : {
+            productId,
+            top: buttonRect.bottom + 6,
+            left: buttonRect.right - 160
+          }
+    );
+  }
+
   function openCreate() {
     setSkuPreviewError("");
     setForm({
@@ -471,6 +550,7 @@ export function InventoryScreen({
       compatibleUnits: "",
       barcode: "",
       unit: "pc",
+      unitCost: 0,
       costPrice: 0,
       sellingPrice: 0,
       stockQty: 0,
@@ -479,6 +559,7 @@ export function InventoryScreen({
       lowStockThreshold: productSettings.lowStockThreshold
     });
     setCreateQtyInput("0");
+    setCreateUnitCostInput("0.00");
     setCreatePriceInput("0.00");
     setCreatePhotoFile(null);
     setCreatePhotoPreview(null);
@@ -497,6 +578,7 @@ export function InventoryScreen({
       compatibleUnits: product.compatibleUnits ?? "",
       barcode: product.barcode ?? "",
       unit: product.unit,
+      unitCost: product.unitCost,
       costPrice: product.costPrice,
       sellingPrice: product.sellingPrice,
       stockQty: product.stockQty,
@@ -669,6 +751,10 @@ export function InventoryScreen({
       alert("SKU is required");
       return;
     }
+    if (!Number.isFinite(form.unitCost)) {
+      alert("Unit Cost must be numeric");
+      return;
+    }
     const response = await fetch("/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -723,6 +809,10 @@ export function InventoryScreen({
     }
     if (!Number.isFinite(form.sellingPrice)) {
       alert("Price must be numeric");
+      return;
+    }
+    if (!Number.isFinite(form.unitCost)) {
+      alert("Unit Cost must be numeric");
       return;
     }
     if (!Number.isFinite(form.stockQty)) {
@@ -965,6 +1055,11 @@ export function InventoryScreen({
                   </button>
                 </th>
                 <th>
+                  <button type="button" className="table-sort-btn" onClick={() => changeSort("unitCost")}>
+                    Unit Cost
+                  </button>
+                </th>
+                <th>
                   <button
                     type="button"
                     className="table-sort-btn"
@@ -974,7 +1069,7 @@ export function InventoryScreen({
                   </button>
                 </th>
                 <th>Stock Status</th>
-                <th>Actions</th>
+                <th className="inventory-actions-column">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1006,34 +1101,33 @@ export function InventoryScreen({
                   <td>{item.sku}</td>
                   {productSettings.enableProductCategories ? <td>{item.category}</td> : null}
                   <td>{formatNumber(item.stockQty)}</td>
+                  <td>{formatCurrency(item.unitCost)}</td>
                   <td>{formatCurrency(item.sellingPrice)}</td>
                   <td>
                     <span className={`badge ${stockStatus.className}`}>{stockStatus.label}</span>
                   </td>
-                  <td>
+                  <td className="actions-cell">
                     <div className="inventory-actions">
-                        <button className="btn-info" onClick={() => openEdit(item)}>
-                          Edit
-                        </button>
-                        {productSettings.allowManualStockAdjustments && isAdmin ? (
-                          <button className="btn-secondary" onClick={() => openAdjust(item)}>
-                            Adjust Stock
-                          </button>
-                        ) : null}
-                        {item.isActive ? (
-                          <button className="btn-secondary" onClick={() => archiveProduct(item.id)}>
-                            Archive Item
-                        </button>
-                      ) : (
-                        <button className="btn-success" onClick={() => restoreProduct(item.id)}>
-                          Restore
-                        </button>
-                      )}
-                      {!item.isActive && isAdmin && productSettings.allowProductDeletion ? (
-                        <button className="btn-danger" onClick={() => deleteProduct(item.id)}>
-                          Permanently Delete
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className="icon-action-btn"
+                        aria-label={`Edit ${item.name}`}
+                        onClick={() => {
+                          setActionsMenuState(null);
+                          openEdit(item);
+                        }}
+                      >
+                        <PencilIcon className="icon-action-svg" />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-action-btn"
+                        aria-label={`More actions for ${item.name}`}
+                        aria-expanded={actionsMenuState?.productId === item.id}
+                        onClick={(event) => toggleActionsMenu(event, item.id)}
+                      >
+                        <MoreVerticalIcon className="icon-action-svg" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1041,7 +1135,7 @@ export function InventoryScreen({
               }))}
               {!loadingList && !products.length ? (
                 <tr>
-                  <td colSpan={productSettings.enableProductCategories ? 8 : 7} className="muted">
+                  <td colSpan={inventoryTableColumns} className="muted">
                     {inventoryFilter === "active"
                       ? "No active inventory items yet."
                       : inventoryFilter === "archived"
@@ -1081,6 +1175,154 @@ export function InventoryScreen({
         </div>
       </div>
 
+      {actionsMenuState ? (
+        <div
+          ref={actionsMenuRef}
+          className="inventory-actions-menu inventory-actions-menu-floating"
+          style={{
+            top: actionsMenuState.top,
+            left: actionsMenuState.left
+          }}
+        >
+          {(() => {
+            const menuProduct = products.find((product) => product.id === actionsMenuState.productId);
+            if (!menuProduct) return null;
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionsMenuState(null);
+                    void openHistory(menuProduct);
+                  }}
+                >
+                  History
+                </button>
+                {productSettings.allowManualStockAdjustments && isAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuState(null);
+                      openAdjust(menuProduct);
+                    }}
+                  >
+                    Adjust Stock
+                  </button>
+                ) : null}
+                {menuProduct.isActive ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuState(null);
+                      void archiveProduct(menuProduct.id);
+                    }}
+                  >
+                    Archive Item
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionsMenuState(null);
+                        void restoreProduct(menuProduct.id);
+                      }}
+                    >
+                      Restore
+                    </button>
+                    {isAdmin && productSettings.allowProductDeletion ? (
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          setActionsMenuState(null);
+                          void deleteProduct(menuProduct.id);
+                        }}
+                      >
+                        Permanently Delete
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
+
+      {historyOpen && activeProduct ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal inventory-history-modal inventory-modal-responsive">
+            <div className="inventory-modal-header">
+              <h3 className="section-title">Item History</h3>
+              <div className="muted">
+                {activeProduct.name} ({activeProduct.sku})
+              </div>
+            </div>
+            <div className="inventory-modal-body">
+              <div className="table-wrap inventory-history-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Quantity Change</th>
+                      <th>Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyLoading ? (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          Loading history...
+                        </td>
+                      </tr>
+                    ) : historyRows.length ? (
+                      historyRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>{new Date(row.date).toLocaleString("en-PH")}</td>
+                          <td>{row.type}</td>
+                          <td>
+                            <span
+                              className={
+                                row.quantityChange >= 0
+                                  ? "inventory-history-delta inventory-history-delta-positive"
+                                  : "inventory-history-delta inventory-history-delta-negative"
+                              }
+                            >
+                              {row.quantityChange >= 0 ? "+" : ""}
+                              {formatNumber(row.quantityChange)}
+                            </span>
+                          </td>
+                          <td>{row.reference}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          No transaction history for this item yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="row inventory-modal-footer">
+              <SecondaryButton
+                onClick={() => {
+                  setHistoryOpen(false);
+                  setHistoryRows([]);
+                  setActiveProduct(null);
+                }}
+              >
+                Close
+              </SecondaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {importOpen ? (
         <div className="inventory-modal-overlay">
           <div className="inventory-modal inventory-import-modal inventory-modal-responsive">
@@ -1106,8 +1348,8 @@ export function InventoryScreen({
                 </div>
 
                 <div className="field-help">
-                  Supported columns: SKU, Product Name, Category, Description, Price, Current Stock,
-                  Compatible Units, Active Status.
+                  Supported columns: SKU, Product Name, Category, Description, Unit Cost, Price,
+                  Current Stock, Compatible Units, Active Status.
                 </div>
 
                 {importFileName ? (
@@ -1135,6 +1377,7 @@ export function InventoryScreen({
                           <th>SKU</th>
                           <th>Product Name</th>
                           <th>Category</th>
+                          <th>Unit Cost</th>
                           <th>Price</th>
                           <th>Stock</th>
                           <th>Status</th>
@@ -1148,6 +1391,7 @@ export function InventoryScreen({
                             <td>{row.sku || "-"}</td>
                             <td>{row.name || "-"}</td>
                             <td>{row.category || "-"}</td>
+                            <td>{row.unitCost == null ? "-" : formatCurrency(row.unitCost)}</td>
                             <td>{row.price == null ? "-" : formatCurrency(row.price)}</td>
                             <td>{row.stockQty == null ? "-" : formatNumber(row.stockQty)}</td>
                             <td>{row.isActive ? "Active" : "Inactive"}</td>
@@ -1254,6 +1498,33 @@ export function InventoryScreen({
               ) : null}
               <div className="row">
                 <div className="form-field">
+                  <label className="field-label">Unit Cost</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={createUnitCostInput}
+                    onChange={(event) => {
+                      const next = sanitizeDecimalInput(event.target.value);
+                      setCreateUnitCostInput(next);
+                      setForm({
+                        ...form,
+                        unitCost: toNumber(next),
+                        costPrice: toNumber(next)
+                      });
+                    }}
+                    onBlur={() => {
+                      const normalized = normalizeDecimalInput(createUnitCostInput);
+                      setCreateUnitCostInput(normalized);
+                      setForm({
+                        ...form,
+                        unitCost: toNumber(normalized),
+                        costPrice: toNumber(normalized)
+                      });
+                    }}
+                  />
+                </div>
+                <div className="form-field">
                   <label className="field-label">Initial Quantity</label>
                   <input
                     type="text"
@@ -1284,8 +1555,7 @@ export function InventoryScreen({
                       setCreatePriceInput(next);
                       setForm({
                         ...form,
-                        sellingPrice: toNumber(next),
-                        costPrice: toNumber(next)
+                        sellingPrice: toNumber(next)
                       });
                     }}
                     onBlur={() => {
@@ -1293,8 +1563,7 @@ export function InventoryScreen({
                       setCreatePriceInput(normalized);
                       setForm({
                         ...form,
-                        sellingPrice: toNumber(normalized),
-                        costPrice: toNumber(normalized)
+                        sellingPrice: toNumber(normalized)
                       });
                     }}
                   />
@@ -1475,6 +1744,22 @@ export function InventoryScreen({
 
                 <div className="inventory-form-section">
                   <div className="inventory-form-grid">
+                    <div className="form-field">
+                      <label className="field-label">Unit Cost</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={form.unitCost}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            unitCost: toNumber(sanitizeDecimalInput(event.target.value)),
+                            costPrice: toNumber(sanitizeDecimalInput(event.target.value))
+                          })
+                        }
+                      />
+                    </div>
                     <div className="form-field">
                       <label className="field-label">Price</label>
                       <input

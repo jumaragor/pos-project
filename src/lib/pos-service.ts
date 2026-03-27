@@ -1,4 +1,5 @@
 import {
+  InventoryReferenceType,
   PaymentMethod,
   PendingOpType,
   Prisma,
@@ -7,6 +8,11 @@ import {
   TransactionStatus
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  applyInventoryAdjustment,
+  applySaleIssue,
+  reverseSaleIssue
+} from "@/lib/inventory-valuation";
 import { assertPermission } from "@/lib/rbac";
 import { computeCartTotals, DiscountInput } from "@/lib/pricing";
 import { getInventorySettings } from "@/lib/inventory-settings";
@@ -73,7 +79,7 @@ function prepareSaleItems(products: Awaited<ReturnType<typeof loadProductsForIte
       productId: product.id,
       qty,
       price,
-      costAtSale: product.costPrice,
+      costAtSale: new Prisma.Decimal(product.unitCost),
       subtotal: qty * price
     } satisfies PreparedItem;
   });
@@ -225,28 +231,23 @@ export async function createSale(input: SaleInput) {
       }
 
       for (const item of preparedItems) {
+        const unitCost = await applySaleIssue(tx, {
+          productId: item.productId,
+          quantity: item.qty,
+          reason: input.draftId ? "Completed held POS sale" : "POS sale",
+          referenceId: transaction.id,
+          referenceType: InventoryReferenceType.SALE,
+          userId: input.userId,
+          method: inventorySettings.inventoryValuationMethod
+        });
         await tx.transactionItem.create({
           data: {
             transactionId: transaction.id,
             productId: item.productId,
             qty: item.qty,
             price: item.price,
-            costAtSale: item.costAtSale,
+            costAtSale: unitCost,
             subtotal: item.subtotal
-          }
-        });
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stockQty: { decrement: item.qty } }
-        });
-        await tx.stockMovement.create({
-          data: {
-            type: StockMovementType.SALE,
-            productId: item.productId,
-            qtyDelta: -item.qty,
-            reason: input.draftId ? "Completed held POS sale" : "POS sale",
-            refId: transaction.id,
-            userId: input.userId
           }
         });
       }
@@ -297,6 +298,7 @@ export async function getHeldTransaction(transactionId: string) {
 
 export async function voidTransaction(transactionId: string, actorId: string, actorRole: Role) {
   assertPermission(actorRole, "VOID_REFUND");
+  const inventorySettings = await getInventorySettings();
   return prisma.$transaction(async (tx) => {
     const transaction = await tx.transaction.findUnique({
       where: { id: transactionId },
@@ -313,19 +315,15 @@ export async function voidTransaction(transactionId: string, actorId: string, ac
       data: { status: TransactionStatus.VOID }
     });
     for (const item of transaction.items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { stockQty: { increment: item.qty } }
-      });
-      await tx.stockMovement.create({
-        data: {
-          type: StockMovementType.REFUND,
-          productId: item.productId,
-          qtyDelta: item.qty,
-          reason: `Void sale ${transaction.number}`,
-          refId: transaction.id,
-          userId: actorId
-        }
+      await reverseSaleIssue(tx, {
+        productId: item.productId,
+        quantity: Number(item.qty),
+        unitCost: item.costAtSale,
+        reason: `Void sale ${transaction.number}`,
+        referenceId: transaction.id,
+        referenceType: InventoryReferenceType.SALE,
+        userId: actorId,
+        method: inventorySettings.inventoryValuationMethod
       });
     }
     await tx.auditLog.create({
@@ -343,6 +341,7 @@ export async function voidTransaction(transactionId: string, actorId: string, ac
 
 export async function refundTransaction(transactionId: string, actorId: string, actorRole: Role) {
   assertPermission(actorRole, "VOID_REFUND");
+  const inventorySettings = await getInventorySettings();
   return prisma.$transaction(async (tx) => {
     const transaction = await tx.transaction.findUnique({
       where: { id: transactionId },
@@ -359,19 +358,15 @@ export async function refundTransaction(transactionId: string, actorId: string, 
       data: { status: TransactionStatus.REFUNDED }
     });
     for (const item of transaction.items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { stockQty: { increment: item.qty } }
-      });
-      await tx.stockMovement.create({
-        data: {
-          type: StockMovementType.REFUND,
-          productId: item.productId,
-          qtyDelta: item.qty,
-          reason: "Transaction refund",
-          refId: transaction.id,
-          userId: actorId
-        }
+      await reverseSaleIssue(tx, {
+        productId: item.productId,
+        quantity: Number(item.qty),
+        unitCost: item.costAtSale,
+        reason: "Transaction refund",
+        referenceId: transaction.id,
+        referenceType: InventoryReferenceType.SALE,
+        userId: actorId,
+        method: inventorySettings.inventoryValuationMethod
       });
     }
     await tx.auditLog.create({
@@ -427,15 +422,13 @@ export async function pushOfflineOperations(
           if (!inventorySettings.allowNegativeStock && Number(product.stockQty) + qtyDelta < 0) {
             throw new Error("Insufficient stock");
           }
-          await tx.product.update({ where: { id: productId }, data: { stockQty: { increment: qtyDelta } } });
-          await tx.stockMovement.create({
-            data: {
-              type: StockMovementType.ADJUSTMENT,
-              productId,
-              qtyDelta,
-              reason,
-              userId
-            }
+          await applyInventoryAdjustment(tx, {
+            productId,
+            quantity: qtyDelta,
+            reason,
+            referenceType: InventoryReferenceType.ADJUSTMENT,
+            userId,
+            method: inventorySettings.inventoryValuationMethod
           });
           await tx.auditLog.create({
             data: {

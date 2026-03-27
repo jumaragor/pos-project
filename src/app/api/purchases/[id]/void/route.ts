@@ -1,6 +1,8 @@
-import { PurchaseStatus, StockMovementType } from "@prisma/client";
+import { InventoryReferenceType, PurchaseStatus } from "@prisma/client";
 import { getAuthUser } from "@/lib/api-auth";
 import { badRequest, ok, serverError, unauthorized } from "@/lib/http";
+import { getInventorySettings } from "@/lib/inventory-settings";
+import { applyInventoryAdjustment } from "@/lib/inventory-valuation";
 import { prisma } from "@/lib/prisma";
 import { buildVoidedPurchaseNote, isVoidedPurchaseNote } from "@/lib/purchase-utils";
 
@@ -14,6 +16,7 @@ export async function POST(_request: Request, { params }: Params) {
     }
 
     const { id } = await params;
+    const inventorySettings = await getInventorySettings();
     const purchase = await prisma.purchase.findUnique({
       where: { id },
       include: { items: true }
@@ -48,19 +51,15 @@ export async function POST(_request: Request, { params }: Params) {
 
     const updated = await prisma.$transaction(async (tx) => {
       for (const item of purchase.items) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stockQty: { decrement: item.quantity } }
-        });
-        await tx.stockMovement.create({
-          data: {
-            type: StockMovementType.ADJUSTMENT,
-            productId: item.productId,
-            qtyDelta: -Number(item.quantity),
-            reason: `Void purchase ${purchase.purchaseNumber}`,
-            refId: purchase.id,
-            userId: actor.id
-          }
+        await applyInventoryAdjustment(tx, {
+          productId: item.productId,
+          quantity: -Number(item.quantity),
+          unitCost: item.unitCost,
+          reason: `Void purchase ${purchase.purchaseNumber}`,
+          referenceId: purchase.id,
+          referenceType: InventoryReferenceType.PURCHASE,
+          userId: actor.id,
+          method: inventorySettings.inventoryValuationMethod
         });
       }
 
