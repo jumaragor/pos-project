@@ -28,18 +28,36 @@ export const authOptions: NextAuthOptions = {
         }
         const username = credentials.username.trim().toLowerCase();
         const userLookupTimer = startPerfTimer("auth.userLookup");
-        const user = await prisma.user.findUnique({
-          where: { username },
-          select: {
-            id: true,
-            name: true,
-            username: true,
-            email: true,
-            role: true,
-            status: true,
-            passwordHash: true
-          }
-        });
+        console.log("[auth] findUnique query starting for username:", username);
+        const QUERY_TIMEOUT_MS = 10_000;
+        let user: Awaited<ReturnType<typeof prisma.user.findUnique>>;
+        try {
+          user = await Promise.race([
+            prisma.user.findUnique({
+              where: { username },
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                role: true,
+                status: true,
+                passwordHash: true
+              }
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`findUnique timed out after ${QUERY_TIMEOUT_MS}ms`)),
+                QUERY_TIMEOUT_MS
+              )
+            )
+          ]);
+        } catch (err) {
+          userLookupTimer.end({ found: false, error: String(err) });
+          console.error("[auth] findUnique failed or timed out:", err);
+          return null;
+        }
+        console.log("[auth] findUnique query completed, found:", Boolean(user));
         userLookupTimer.end({ found: Boolean(user) });
         if (!user) {
           authorizeTimer.end({ result: "user-not-found" });
