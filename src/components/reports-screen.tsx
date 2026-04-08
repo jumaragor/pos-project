@@ -174,8 +174,8 @@ export function ReportsScreen() {
     success("Transaction printed successfully");
   }
 
-  const trendMax = Math.max(...(overview?.salesTrend.map((point) => point.total) ?? [1]), 1);
   const trendSeries = overview?.salesTrend ?? [];
+  const trendMax = Math.max(...trendSeries.map((point) => point.total), 1);
   const trendWidth = 760;
   const trendHeight = 220;
   const trendPadding = 20;

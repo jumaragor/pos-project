@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient, Role } from "@prisma/client";
+import { ensureDefaultExpenseCategories } from "../src/lib/expense-utils";
 
 const prisma = new PrismaClient();
 
@@ -10,9 +11,15 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "owner@microbiz.local" },
-    update: {},
+    update: {
+      name: "Owner Demo",
+      username: "owner",
+      passwordHash: ownerPassword,
+      role: Role.OWNER
+    },
     create: {
       name: "Owner Demo",
+      username: "owner",
       email: "owner@microbiz.local",
       passwordHash: ownerPassword,
       role: Role.OWNER
@@ -21,9 +28,15 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "manager@microbiz.local" },
-    update: {},
+    update: {
+      name: "Manager Demo",
+      username: "manager",
+      passwordHash: managerPassword,
+      role: Role.MANAGER
+    },
     create: {
       name: "Manager Demo",
+      username: "manager",
       email: "manager@microbiz.local",
       passwordHash: managerPassword,
       role: Role.MANAGER
@@ -32,9 +45,15 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "cashier@microbiz.local" },
-    update: {},
+    update: {
+      name: "Cashier Demo",
+      username: "cashier",
+      passwordHash: cashierPassword,
+      role: Role.CASHIER
+    },
     create: {
       name: "Cashier Demo",
+      username: "cashier",
       email: "cashier@microbiz.local",
       passwordHash: cashierPassword,
       role: Role.CASHIER
@@ -101,6 +120,8 @@ async function main() {
     update: {},
     create: { key: "allowNegativeStock", value: "false" }
   });
+
+  await ensureDefaultExpenseCategories(prisma);
 }
 
 main()

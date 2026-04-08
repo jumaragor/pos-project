@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Sidebar } from "@/components/sidebar";
+import { IdleSessionGuard } from "@/components/idle-session-guard";
 import { applyThemeToDocument } from "@/lib/theme";
 
 export function AppChrome({ children }: { children: React.ReactNode }) {
@@ -84,6 +85,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   }
   return (
     <div className={collapsed ? "app-shell app-shell-collapsed" : "app-shell"}>
+      <IdleSessionGuard />
       <Sidebar
         collapsed={collapsed}
         onToggle={toggleSidebar}

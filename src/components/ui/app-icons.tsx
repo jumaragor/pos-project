@@ -69,6 +69,18 @@ export function PurchasesIcon(props: IconProps) {
   );
 }
 
+export function ExpensesIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M6 4h12" />
+      <path d="M7 4v16a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4" />
+      <path d="M9 9h6" />
+      <path d="M9 13h6" />
+      <path d="M9 17h4" />
+    </BaseIcon>
+  );
+}
+
 export function SuppliersIcon(props: IconProps) {
   return (
     <BaseIcon {...props}>
@@ -204,6 +216,7 @@ export const sectionIcons = {
   pos: PosIcon,
   inventory: InventoryIcon,
   purchases: PurchasesIcon,
+  expenses: ExpensesIcon,
   suppliers: SuppliersIcon,
   customers: CustomersIcon,
   reports: ReportsIcon,

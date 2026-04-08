@@ -1,144 +1,183 @@
-import { TransactionStatus } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import Link from "next/link";
+import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
-import { MetricWidget } from "@/components/ui/metric-widget";
 import { formatCurrency, formatNumber } from "@/lib/format";
-import { getInventorySettings } from "@/lib/inventory-settings";
+import { getDashboardData } from "@/lib/dashboard";
+import { KpiCard } from "@/components/dashboard/kpi-card";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const completedWhere = { createdAt: { gte: start }, status: TransactionStatus.COMPLETED };
-  const [transactions, transactionItems, products, inventorySettings] = await Promise.all([
-    prisma.transaction.findMany({
-      where: completedWhere,
-      select: {
-        id: true,
-        totalAmount: true,
-        paymentMethod: true,
-        cashAmount: true
-      }
-    }),
-    prisma.transactionItem.findMany({
-      where: { transaction: completedWhere },
-      select: {
-        productId: true,
-        qty: true,
-        subtotal: true,
-        costAtSale: true,
-        product: { select: { name: true } }
-      }
-    }),
-    prisma.product.findMany({
-      select: { id: true, name: true, sku: true, stockQty: true },
-      orderBy: { stockQty: "asc" },
-      take: 8
-    }),
-    getInventorySettings()
-  ]);
-
-  const lowStock = inventorySettings.enableLowStockAlerts
-    ? products.filter((product) => Number(product.stockQty) <= inventorySettings.lowStockThreshold)
-    : [];
-  const todaySales = transactions.reduce((sum, transaction) => sum + Number(transaction.totalAmount), 0);
-  const todayProfit =
-    todaySales -
-    transactionItems.reduce((sum, item) => sum + Number(item.costAtSale) * Number(item.qty), 0);
-  const cashOnHand = transactions.reduce((sum, transaction) => {
-    if (transaction.paymentMethod === "CASH") return sum + Number(transaction.totalAmount);
-    if (transaction.paymentMethod === "SPLIT") return sum + Number(transaction.cashAmount ?? 0);
-    return sum;
-  }, 0);
-
-  const topSellingMap = new Map<string, { name: string; qty: number; sales: number }>();
-  for (const item of transactionItems) {
-    const existing = topSellingMap.get(item.productId) ?? {
-      name: item.product.name,
-      qty: 0,
-      sales: 0
-    };
-    existing.qty += Number(item.qty);
-    existing.sales += Number(item.subtotal);
-    topSellingMap.set(item.productId, existing);
-  }
-  const topSelling = [...topSellingMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 8);
+  const data = await getDashboardData();
+  const maxPaymentAmount = Math.max(...data.paymentBreakdown.map((item) => item.amount), 1);
 
   return (
-    <div className="grid">
-      <div className="grid grid-4">
-        <MetricWidget label="Today's Sales" value={formatCurrency(todaySales)} trend="+3.2%" trendDir="up" />
-        <MetricWidget
+    <div className="grid dashboard-grid">
+      <div className="grid grid-4 dashboard-kpi-grid">
+        <KpiCard
+          label="Today's Sales"
+          value={formatCurrency(data.kpis.todaySales.value)}
+        />
+        <KpiCard
           label="Today's Profit"
-          value={formatCurrency(todayProfit)}
-          trend={todayProfit >= 0 ? "+2.1%" : "-2.1%"}
-          trendDir={todayProfit >= 0 ? "up" : "down"}
+          value={formatCurrency(data.kpis.todayProfit.value)}
         />
-        <MetricWidget
+        <KpiCard
           label="Transactions Today"
-          value={formatNumber(transactions.length)}
-          trend={transactions.length > 0 ? "+1.4%" : "0.0%"}
-          trendDir="up"
+          value={formatNumber(data.kpis.transactionsToday.value)}
         />
-        <MetricWidget label="Cash on Hand" value={formatCurrency(cashOnHand)} trend="+0.8%" trendDir="up" />
+        <KpiCard
+          label="Cash on Hand"
+          value={formatCurrency(data.kpis.cashOnHand.value)}
+        />
       </div>
 
-      <div className="grid grid-2">
-        <DataTable title="Top Selling Products">
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Qty Sold</th>
-                <th>Sales</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topSelling.map((item) => (
-                <tr key={item.name}>
-                  <td>{item.name}</td>
-                  <td>{formatNumber(item.qty)}</td>
-                  <td>{formatCurrency(item.sales)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </DataTable>
+      <div className="grid grid-2 dashboard-main-grid">
+        <Card className="dashboard-panel">
+          <div className="dashboard-panel-head">
+            <div>
+              <h2 className="section-title">Inventory Health</h2>
+            </div>
+          </div>
 
-        <DataTable title="Low Stock Alerts">
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>SKU</th>
-                <th>Stock</th>
-                <th>Threshold</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inventorySettings.enableLowStockAlerts ? (
-                lowStock.length ? (
-                  lowStock.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.name}</td>
-                      <td>{item.sku}</td>
-                      <td>{formatNumber(item.stockQty)}</td>
-                      <td>{formatNumber(inventorySettings.lowStockThreshold)}</td>
+          <div className="dashboard-health-grid">
+            {data.inventoryHealth.metrics.map((metric) => (
+              <Link key={metric.label} href={metric.href} className={`dashboard-health-card tone-${metric.tone}`}>
+                <span>{metric.label}</span>
+                <strong>{formatNumber(metric.value)}</strong>
+              </Link>
+            ))}
+          </div>
+
+          <div className="dashboard-subsection">
+            <div className="dashboard-subsection-head">
+              <h3>Low Stock Alerts</h3>
+              {data.inventoryHealth.lowStockAlertsEnabled ? (
+                <Link href="/inventory" className="dashboard-inline-link">
+                  Open Inventory
+                </Link>
+              ) : null}
+            </div>
+            {!data.inventoryHealth.lowStockAlertsEnabled ? (
+              <div className="dashboard-empty">Low stock alerts are disabled.</div>
+            ) : data.inventoryHealth.lowStockAlerts.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>SKU</th>
+                      <th>Stock</th>
+                      <th>Threshold</th>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4} className="muted">No low stock alerts.</td>
-                  </tr>
-                )
-              ) : (
+                  </thead>
+                  <tbody>
+                    {data.inventoryHealth.lowStockAlerts.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.name}</td>
+                        <td>{item.sku}</td>
+                        <td>{formatNumber(item.stock)}</td>
+                        <td>{formatNumber(item.threshold)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="dashboard-empty">No low stock items right now.</div>
+            )}
+          </div>
+        </Card>
+
+        <Card className="dashboard-panel">
+          <div className="dashboard-panel-head">
+            <div>
+              <h2 className="section-title">Payment Breakdown</h2>
+            </div>
+          </div>
+
+          <div className="dashboard-payment-list">
+            {data.paymentBreakdown.map((item) => (
+              <div key={item.key} className="dashboard-payment-row">
+                <div className="dashboard-payment-copy">
+                  <strong>{item.label}</strong>
+                  <span>{formatNumber(item.count)} transaction(s)</span>
+                </div>
+                <div className="dashboard-payment-amount">
+                  <strong>{formatCurrency(item.amount)}</strong>
+                  <div className="dashboard-payment-bar">
+                    <span style={{ width: `${(item.amount / maxPaymentAmount) * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-2 dashboard-main-grid">
+        <Card className="dashboard-panel">
+          <div className="dashboard-panel-head">
+            <div>
+              <h2 className="section-title">Top Products</h2>
+              <p className="dashboard-panel-subtitle">Best contributors over the last 30 days</p>
+            </div>
+          </div>
+          {data.topProducts.length ? (
+            <div className="dashboard-top-products">
+              {data.topProducts.map((product) => (
+                <div key={product.id} className="dashboard-top-product-row">
+                  <div className="dashboard-top-product-copy">
+                    <strong>{product.name}</strong>
+                    <span>
+                      {product.sku} · {formatNumber(product.quantity)} qty
+                    </span>
+                  </div>
+                  <div className="dashboard-top-product-stats">
+                    <strong>{formatCurrency(product.sales)}</strong>
+                    <span>{product.contributionPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="dashboard-top-product-bar">
+                    <span style={{ width: `${Math.min(product.contributionPct, 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard-empty">No product sales yet.</div>
+          )}
+        </Card>
+        <DataTable title="Recent Activity">
+          {data.recentActivity.length ? (
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={4} className="muted">Low stock alerts are disabled.</td>
+                  <th>Type</th>
+                  <th>Reference</th>
+                  <th>Timestamp</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recentActivity.map((activity) => (
+                  <tr key={activity.id}>
+                    <td className="dashboard-activity-type">{activity.label}</td>
+                    <td>
+                      {activity.href ? (
+                        <Link href={activity.href} className="dashboard-inline-link">
+                          {activity.reference}
+                        </Link>
+                      ) : (
+                        activity.reference
+                      )}
+                    </td>
+                    <td>{new Date(activity.timestamp).toLocaleString("en-PH")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="dashboard-empty">No recent activity yet.</div>
+          )}
         </DataTable>
       </div>
     </div>

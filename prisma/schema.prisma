@@ -24,6 +24,14 @@ enum PaymentMethod {
   SPLIT
 }
 
+enum ExpensePaymentMethod {
+  CASH
+  GCASH
+  CARD
+  BANK_TRANSFER
+  OTHERS
+}
+
 enum TransactionStatus {
   DRAFT
   COMPLETED
@@ -68,24 +76,32 @@ enum SupplierStatus {
   INACTIVE
 }
 
+enum ExpenseStatus {
+  PAID
+  PENDING
+  CANCELLED
+}
+
 enum CategoryStatus {
   ACTIVE
   INACTIVE
 }
 
 model User {
-  id           String        @id @default(cuid())
-  name         String
-  username     String?       @unique
-  email        String        @unique
-  passwordHash String
-  role         Role
-  status       UserStatus    @default(ACTIVE)
-  lastLoginAt  DateTime?
-  createdAt    DateTime      @default(now())
-  transactions Transaction[]
-  stockMoves   StockMovement[]
-  auditLogs    AuditLog[]    @relation("AuditActor")
+  id                String        @id @default(cuid())
+  name              String
+  username          String?       @unique
+  email             String        @unique
+  passwordHash      String
+  role              Role
+  status            UserStatus    @default(ACTIVE)
+  lastLoginAt       DateTime?
+  createdAt         DateTime      @default(now())
+  transactions      Transaction[]
+  stockMoves        StockMovement[]
+  createdExpenses   Expense[]     @relation("ExpenseCreatedBy")
+  cancelledExpenses Expense[]     @relation("ExpenseCancelledBy")
+  auditLogs         AuditLog[]    @relation("AuditActor")
 }
 
 model Product {
@@ -273,4 +289,35 @@ model Supplier {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   purchases     Purchase[]
+}
+
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expenses  Expense[]
+}
+
+model Expense {
+  id             String               @id @default(cuid())
+  expenseNo      String               @unique
+  date           DateTime
+  categoryId     String
+  description    String
+  amount         Decimal              @db.Decimal(12, 2)
+  paymentMethod  ExpensePaymentMethod?
+  paidTo         String?
+  referenceNo    String?
+  remarks        String?
+  status         ExpenseStatus        @default(PAID)
+  createdById    String?
+  cancelledById  String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  cancelledAt    DateTime?
+  category       ExpenseCategory      @relation(fields: [categoryId], references: [id])
+  createdBy      User?                @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  cancelledBy    User?                @relation("ExpenseCancelledBy", fields: [cancelledById], references: [id])
 }

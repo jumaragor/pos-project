@@ -10,10 +10,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed",
-    "prisma:cleanup-demo": "tsx prisma/cleanup-demo.ts"
+    "prisma:generate": "node scripts/run-with-env.cjs .env.local \"npx prisma generate\"",
+    "prisma:migrate": "node scripts/run-with-env.cjs .env.local \"npx prisma migrate dev\"",
+    "prisma:seed": "node scripts/run-with-env.cjs .env.local \"npx prisma db seed\"",
+    "prisma:cleanup-demo": "node scripts/run-with-env.cjs .env.local \"npx tsx prisma/cleanup-demo.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
