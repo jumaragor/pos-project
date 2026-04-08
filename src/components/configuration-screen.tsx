@@ -341,8 +341,13 @@ export function ConfigurationScreen() {
     }
     setUserOpen(false);
     await loadUsers();
+    const payload = await response.json();
     if (activeUser?.id === data?.user?.id) {
-      window.dispatchEvent(new Event("microbiz:user-updated"));
+      window.dispatchEvent(
+        new CustomEvent("microbiz:user-updated", {
+          detail: { name: payload.name ?? userForm.name.trim() }
+        })
+      );
     }
     success(userMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
   }

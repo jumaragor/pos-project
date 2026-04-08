@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { LogoMarkIcon } from "@/components/ui/app-icons";
@@ -14,6 +14,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    router.prefetch("/dashboard");
+  }, [router]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -34,7 +38,7 @@ export default function LoginPage() {
     } else {
       sessionStorage.removeItem("microbiz.session.remember");
     }
-    router.push("/dashboard");
+    router.replace("/dashboard");
   }
 
   return (

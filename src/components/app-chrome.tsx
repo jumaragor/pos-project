@@ -11,6 +11,8 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [storeName, setStoreName] = useState("MicroBiz POS");
+  const [storeLogoUrl, setStoreLogoUrl] = useState("");
   const isLogin = pathname.startsWith("/login");
 
   useEffect(() => {
@@ -29,6 +31,8 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
         const payload = await response.json();
         if (!mounted) return;
         applyThemeToDocument(payload);
+        setStoreName(typeof payload.storeName === "string" && payload.storeName.trim() ? payload.storeName : "MicroBiz POS");
+        setStoreLogoUrl(typeof payload.storeLogoUrl === "string" ? payload.storeLogoUrl : "");
       } catch {
         // Keep defaults from CSS variables.
       }
@@ -91,6 +95,8 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
         onToggle={toggleSidebar}
         mobileOpen={mobileOpen}
         onMobileClose={closeMobileNav}
+        storeName={storeName}
+        storeLogoUrl={storeLogoUrl}
       />
       <DashboardLayout collapsed={collapsed} onMenuToggle={openMobileNav}>
         {children}

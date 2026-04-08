@@ -34,52 +34,32 @@ export function Sidebar({
   collapsed,
   onToggle,
   mobileOpen,
-  onMobileClose
+  onMobileClose,
+  storeName,
+  storeLogoUrl
 }: {
   collapsed: boolean;
   onToggle: () => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  storeName: string;
+  storeLogoUrl: string;
 }) {
   const { data } = useSession();
   const pathname = usePathname();
   const role = data?.user?.role;
   const effectiveCollapsed = mobileOpen ? false : collapsed;
   const visibleLinks = links.filter((link) => (!role ? true : link.roles.includes(role)));
-  const [storeName, setStoreName] = useState("MicroBiz POS");
-  const [storeLogoUrl, setStoreLogoUrl] = useState("");
   const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [storeLogoUrl]);
 
   const resolvedStoreName = useMemo(() => {
     const trimmed = storeName.trim();
     return trimmed.length ? trimmed : "MicroBiz POS";
   }, [storeName]);
-
-  useEffect(() => {
-    let mounted = true;
-    async function loadBranding() {
-      try {
-        const response = await fetch("/api/settings");
-        if (!response.ok) return;
-        const payload = (await response.json()) as { storeName?: string; storeLogoUrl?: string };
-        if (!mounted) return;
-        setStoreName(typeof payload.storeName === "string" ? payload.storeName : "MicroBiz POS");
-        setStoreLogoUrl(typeof payload.storeLogoUrl === "string" ? payload.storeLogoUrl : "");
-        setLogoFailed(false);
-      } catch {
-        // Keep fallback branding.
-      }
-    }
-    void loadBranding();
-    const listener = () => {
-      void loadBranding();
-    };
-    window.addEventListener("microbiz:settings-updated", listener);
-    return () => {
-      mounted = false;
-      window.removeEventListener("microbiz:settings-updated", listener);
-    };
-  }, []);
 
   return (
     <>

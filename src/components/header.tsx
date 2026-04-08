@@ -57,26 +57,19 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
+    setCurrentUserName(data?.user?.name?.trim() || null);
+  }, [data?.user?.name]);
 
-    async function loadCurrentUser() {
-      const response = await fetch("/api/users/me");
-      if (!response.ok) return;
-      const payload = (await response.json()) as { name?: string | null };
-      if (!mounted) return;
-      setCurrentUserName(payload.name?.trim() || null);
-    }
-
-    void loadCurrentUser();
-    const handleUserUpdated = () => {
-      void loadCurrentUser();
+  useEffect(() => {
+    const handleUserUpdated = (event: Event) => {
+      const detail = event instanceof CustomEvent ? (event.detail as { name?: string } | undefined) : undefined;
+      setCurrentUserName(detail?.name?.trim() || data?.user?.name?.trim() || null);
     };
-    window.addEventListener("microbiz:user-updated", handleUserUpdated);
+    window.addEventListener("microbiz:user-updated", handleUserUpdated as EventListener);
     return () => {
-      mounted = false;
-      window.removeEventListener("microbiz:user-updated", handleUserUpdated);
+      window.removeEventListener("microbiz:user-updated", handleUserUpdated as EventListener);
     };
-  }, []);
+  }, [data?.user?.name]);
 
   return (
     <header className="header">

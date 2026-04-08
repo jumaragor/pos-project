@@ -1,11 +1,7 @@
-import {
-  PaymentMethod,
-  PurchaseStatus,
-  StockMovementType,
-  TransactionStatus
-} from "@prisma/client";
+import { PaymentMethod, StockMovementType, TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getInventorySettings } from "@/lib/inventory-settings";
+import { startPerfTimer } from "@/lib/perf";
 
 type TrendDirection = "up" | "down" | "neutral";
 
@@ -157,28 +153,21 @@ function buildComparison(current: number, previous: number): KpiMetric {
   };
 }
 
-function groupTrendPoints(labels: string[], values: Map<string, number>) {
-  return labels.map((label) => ({
-    label,
-    value: values.get(label) ?? 0
-  }));
-}
-
 export async function getDashboardData(): Promise<DashboardData> {
+  const timer = startPerfTimer("dashboard.getDashboardData");
   const now = new Date();
   const todayStart = startOfDay(now);
   const tomorrowStart = startOfDay(addDays(now, 1));
   const yesterdayStart = startOfDay(addDays(now, -1));
-  const last7Start = startOfDay(addDays(now, -6));
   const last30Start = startOfDay(addDays(now, -29));
 
   const [
-    transactions30,
-    transactionItems30,
+    todayTransactions,
+    yesterdayTransactions,
     profitItems2d,
     products,
-    purchases,
-    pendingPurchasesCount,
+    topProductAggregates,
+    recentPurchases,
     recentSales,
     recentAdjustments,
     inventorySettings
@@ -186,32 +175,25 @@ export async function getDashboardData(): Promise<DashboardData> {
     prisma.transaction.findMany({
       where: {
         status: TransactionStatus.COMPLETED,
-        createdAt: { gte: last30Start, lt: tomorrowStart }
+        createdAt: { gte: todayStart, lt: tomorrowStart }
       },
       select: {
-        id: true,
-        number: true,
         totalAmount: true,
         paymentMethod: true,
         cashAmount: true,
-        qrAmount: true,
-        createdAt: true,
-        user: { select: { name: true } }
-      },
-      orderBy: { createdAt: "desc" }
+        qrAmount: true
+      }
     }),
-    prisma.transactionItem.findMany({
+    prisma.transaction.findMany({
       where: {
-        transaction: {
-          status: TransactionStatus.COMPLETED,
-          createdAt: { gte: last30Start, lt: tomorrowStart }
-        }
+        status: TransactionStatus.COMPLETED,
+        createdAt: { gte: yesterdayStart, lt: todayStart }
       },
       select: {
-        productId: true,
-        qty: true,
-        subtotal: true,
-        product: { select: { name: true, sku: true } }
+        totalAmount: true,
+        paymentMethod: true,
+        cashAmount: true,
+        qrAmount: true
       }
     }),
     prisma.transactionItem.findMany({
@@ -238,20 +220,34 @@ export async function getDashboardData(): Promise<DashboardData> {
         sellingPrice: true
       }
     }),
+    prisma.transactionItem.groupBy({
+      by: ["productId"],
+      where: {
+        transaction: {
+          status: TransactionStatus.COMPLETED,
+          createdAt: { gte: last30Start, lt: tomorrowStart }
+        }
+      },
+      _sum: {
+        qty: true,
+        subtotal: true
+      },
+      orderBy: {
+        _sum: {
+          subtotal: "desc"
+        }
+      },
+      take: 6
+    }),
     prisma.purchase.findMany({
       select: {
         id: true,
         purchaseNumber: true,
         purchaseDate: true,
-        status: true,
-        supplierName: true,
-        supplier: { select: { supplierName: true } }
+        status: true
       },
       orderBy: { purchaseDate: "desc" },
-      take: 10
-    }),
-    prisma.purchase.count({
-      where: { status: PurchaseStatus.DRAFT }
+      take: 5
     }),
     prisma.transaction.findMany({
       where: { status: TransactionStatus.COMPLETED },
@@ -277,12 +273,14 @@ export async function getDashboardData(): Promise<DashboardData> {
     getInventorySettings()
   ]);
 
-  const todayTransactions = transactions30.filter(
-    (tx) => tx.createdAt >= todayStart && tx.createdAt < tomorrowStart
-  );
-  const yesterdayTransactions = transactions30.filter(
-    (tx) => tx.createdAt >= yesterdayStart && tx.createdAt < todayStart
-  );
+  const topProductIds = topProductAggregates.map((item) => item.productId);
+  const topProductDetails = topProductIds.length
+    ? await prisma.product.findMany({
+        where: { id: { in: topProductIds } },
+        select: { id: true, name: true, sku: true }
+      })
+    : [];
+  const topProductDetailMap = new Map(topProductDetails.map((product) => [product.id, product]));
 
   const todaySales = todayTransactions.reduce((sum, tx) => sum + toNumber(tx.totalAmount), 0);
   const yesterdaySales = yesterdayTransactions.reduce((sum, tx) => sum + toNumber(tx.totalAmount), 0);
@@ -305,64 +303,22 @@ export async function getDashboardData(): Promise<DashboardData> {
     return sum;
   }, 0);
 
-  const trendToday = new Map<string, number>();
-  for (let hour = 0; hour < 24; hour += 1) {
-    trendToday.set(`${hour.toString().padStart(2, "0")}:00`, 0);
-  }
-  const trendLast7 = new Map<string, number>();
-  const trendLast30 = new Map<string, number>();
-  const labelsLast7: string[] = [];
-  const labelsLast30: string[] = [];
-
-  for (let daysAgo = 6; daysAgo >= 0; daysAgo -= 1) {
-    const date = addDays(now, -daysAgo);
-    const label = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(date);
-    labelsLast7.push(label);
-    trendLast7.set(label, 0);
-  }
-  for (let daysAgo = 29; daysAgo >= 0; daysAgo -= 1) {
-    const date = addDays(now, -daysAgo);
-    const label = new Intl.DateTimeFormat("en-PH", { month: "numeric", day: "numeric" }).format(date);
-    labelsLast30.push(label);
-    trendLast30.set(label, 0);
-  }
-
-  for (const tx of transactions30) {
-    const amount = toNumber(tx.totalAmount);
-    if (tx.createdAt >= todayStart) {
-      const hourLabel = `${tx.createdAt.getHours().toString().padStart(2, "0")}:00`;
-      trendToday.set(hourLabel, (trendToday.get(hourLabel) ?? 0) + amount);
-    }
-    if (tx.createdAt >= last7Start) {
-      const label = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(tx.createdAt);
-      trendLast7.set(label, (trendLast7.get(label) ?? 0) + amount);
-    }
-    const label30 = new Intl.DateTimeFormat("en-PH", { month: "numeric", day: "numeric" }).format(tx.createdAt);
-    trendLast30.set(label30, (trendLast30.get(label30) ?? 0) + amount);
-  }
-
-  const topProductMap = new Map<string, TopProductItem>();
-  for (const item of transactionItems30) {
-    const existing = topProductMap.get(item.productId) ?? {
-      id: item.productId,
-      name: item.product.name,
-      sku: item.product.sku,
-      quantity: 0,
-      sales: 0,
-      contributionPct: 0
-    };
-    existing.quantity += toNumber(item.qty);
-    existing.sales += toNumber(item.subtotal);
-    topProductMap.set(item.productId, existing);
-  }
-  const salesLast30 = transactions30.reduce((sum, tx) => sum + toNumber(tx.totalAmount), 0);
-  const topProducts = [...topProductMap.values()]
-    .sort((a, b) => b.sales - a.sales)
-    .slice(0, 6)
-    .map((item) => ({
-      ...item,
-      contributionPct: salesLast30 > 0 ? (item.sales / salesLast30) * 100 : 0
-    }));
+  const salesLast30 = topProductAggregates.reduce((sum, item) => sum + toNumber(item._sum.subtotal), 0);
+  const topProducts = topProductAggregates
+    .map((item) => {
+      const product = topProductDetailMap.get(item.productId);
+      if (!product) return null;
+      const sales = toNumber(item._sum.subtotal);
+      return {
+        id: item.productId,
+        name: product.name,
+        sku: product.sku,
+        quantity: toNumber(item._sum.qty),
+        sales,
+        contributionPct: salesLast30 > 0 ? (sales / salesLast30) * 100 : 0
+      } satisfies TopProductItem;
+    })
+    .filter((item): item is TopProductItem => item !== null);
 
   const threshold = inventorySettings.lowStockThreshold;
   let outOfStock = 0;
@@ -393,10 +349,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const lowStockAlerts = inventorySettings.enableLowStockAlerts
     ? [...products]
-        .filter((product) => {
-          const stock = toNumber(product.stockQty);
-          return stock <= threshold;
-        })
+        .filter((product) => toNumber(product.stockQty) <= threshold)
         .sort((a, b) => toNumber(a.stockQty) - toNumber(b.stockQty))
         .slice(0, 5)
         .map((product) => ({
@@ -418,7 +371,9 @@ export async function getDashboardData(): Promise<DashboardData> {
         return sum;
       }, 0),
       count: todayTransactions.filter(
-        (tx) => tx.paymentMethod === PaymentMethod.CASH || (tx.paymentMethod === PaymentMethod.SPLIT && toNumber(tx.cashAmount) > 0)
+        (tx) =>
+          tx.paymentMethod === PaymentMethod.CASH ||
+          (tx.paymentMethod === PaymentMethod.SPLIT && toNumber(tx.cashAmount) > 0)
       ).length
     },
     {
@@ -430,7 +385,9 @@ export async function getDashboardData(): Promise<DashboardData> {
         return sum;
       }, 0),
       count: todayTransactions.filter(
-        (tx) => tx.paymentMethod === PaymentMethod.QR || (tx.paymentMethod === PaymentMethod.SPLIT && toNumber(tx.qrAmount) > 0)
+        (tx) =>
+          tx.paymentMethod === PaymentMethod.QR ||
+          (tx.paymentMethod === PaymentMethod.SPLIT && toNumber(tx.qrAmount) > 0)
       ).length
     },
     {
@@ -447,70 +404,6 @@ export async function getDashboardData(): Promise<DashboardData> {
     }
   ];
 
-  const alerts: AlertItem[] = [
-    { label: "Out of stock items", value: outOfStock, tone: outOfStock > 0 ? "danger" : "info", href: "/inventory" },
-    { label: "Negative inventory", value: negative, tone: negative > 0 ? "danger" : "info", href: "/inventory" },
-    {
-      label: "Low stock for reorder",
-      value: lowStock,
-      tone: lowStock > 0 ? "warning" : "info",
-      href: "/inventory"
-    },
-    {
-      label: "Pending purchases",
-      value: pendingPurchasesCount,
-      tone: pendingPurchasesCount > 0 ? "warning" : "info",
-      href: "/purchases"
-    }
-  ];
-
-  const actionRequired: ActionRequiredItem[] = [];
-  if (negative > 0) {
-    actionRequired.push({
-      type: "negative",
-      count: negative,
-      severity: "high",
-      message: `${negative} product${negative === 1 ? "" : "s"} have negative inventory`,
-      href: "/inventory?filter=negative"
-    });
-  }
-  if (outOfStock > 0) {
-    actionRequired.push({
-      type: "out",
-      count: outOfStock,
-      severity: "high",
-      message: `${outOfStock} product${outOfStock === 1 ? " is" : "s are"} out of stock`,
-      href: "/inventory?filter=out"
-    });
-  }
-  if (lowStock > 0) {
-    actionRequired.push({
-      type: "low",
-      count: lowStock,
-      severity: "medium",
-      message: `${lowStock} product${lowStock === 1 ? " needs" : "s need"} restocking`,
-      href: "/inventory?filter=low"
-    });
-  }
-  if (todayTransactions.length === 0) {
-    actionRequired.push({
-      type: "no-sales",
-      count: 0,
-      severity: "low",
-      message: "No sales recorded today",
-      href: "/pos"
-    });
-  }
-  if (pendingPurchasesCount > 0) {
-    actionRequired.push({
-      type: "pending",
-      count: pendingPurchasesCount,
-      severity: "medium",
-      message: `${pendingPurchasesCount} purchase${pendingPurchasesCount === 1 ? " is" : "s are"} pending`,
-      href: "/purchases"
-    });
-  }
-
   const recentActivity = [
     ...recentSales.map((sale) => ({
       id: `sale-${sale.id}`,
@@ -520,10 +413,10 @@ export async function getDashboardData(): Promise<DashboardData> {
       timestamp: sale.createdAt.toISOString(),
       href: "/pos"
     })),
-    ...purchases.map((purchase) => ({
+    ...recentPurchases.map((purchase) => ({
       id: `purchase-${purchase.id}`,
       type: "purchase" as const,
-      label: purchase.status === PurchaseStatus.DRAFT ? "Purchase draft" : "Purchase posted",
+      label: `Purchase ${String(purchase.status).toLowerCase()}`,
       reference: purchase.purchaseNumber,
       timestamp: purchase.purchaseDate.toISOString(),
       href: "/purchases"
@@ -540,39 +433,11 @@ export async function getDashboardData(): Promise<DashboardData> {
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 8);
 
-  const bestSeller = topProducts[0];
-  const insights: InsightItem[] = [];
-  if (todaySales > 0 || yesterdaySales > 0) {
-    insights.push({
-      id: "sales-trend",
-      text:
-        todaySales >= yesterdaySales
-          ? "Sales are holding or improving versus yesterday."
-          : "Sales are trailing yesterday. Check payment mix and top-moving items.",
-      tone: todaySales >= yesterdaySales ? "success" : "warning"
-    });
-  }
-  if (bestSeller) {
-    insights.push({
-      id: "top-product",
-      text: `${bestSeller.name} is leading today’s momentum with ${bestSeller.contributionPct.toFixed(1)}% of the last 30 days’ sales mix.`,
-      tone: "info"
-    });
-  }
-  if (negative > 0 || outOfStock > 0 || lowStock > 0) {
-    insights.push({
-      id: "inventory-risks",
-      text: `${negative} negative, ${outOfStock} out-of-stock, and ${lowStock} low-stock items need attention.`,
-      tone: negative > 0 || outOfStock > 0 ? "warning" : "info"
-    });
-  }
-  if (!insights.length) {
-    insights.push({
-      id: "fallback",
-      text: "Not enough activity yet. Once sales and inventory movements come in, the dashboard will start surfacing trends.",
-      tone: "info"
-    });
-  }
+  timer.end({
+    todayTransactions: todayTransactions.length,
+    topProducts: topProducts.length,
+    products: products.length
+  });
 
   return {
     kpis: {
@@ -582,9 +447,9 @@ export async function getDashboardData(): Promise<DashboardData> {
       cashOnHand: buildComparison(todayCash, yesterdayCash)
     },
     salesTrend: {
-      today: groupTrendPoints([...trendToday.keys()], trendToday),
-      last7: groupTrendPoints(labelsLast7, trendLast7),
-      last30: groupTrendPoints(labelsLast30, trendLast30)
+      today: [],
+      last7: [],
+      last30: []
     },
     inventoryHealth: {
       metrics: [
@@ -598,13 +463,13 @@ export async function getDashboardData(): Promise<DashboardData> {
     },
     paymentBreakdown,
     topProducts,
-    actionRequired,
-    alerts,
+    actionRequired: [],
+    alerts: [],
     recentActivity,
     inventoryValue: {
       costValue,
       sellingValue
     },
-    insights
+    insights: []
   };
 }
