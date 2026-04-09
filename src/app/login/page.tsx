@@ -1,23 +1,56 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { LogoMarkIcon } from "@/components/ui/app-icons";
 import { PrimaryButton } from "@/components/ui/buttons";
 
+function normalizeCallbackUrl(raw: string | null | undefined) {
+  if (!raw) return "/dashboard";
+
+  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/login")) {
+    return raw;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const url = new URL(raw, window.location.origin);
+      if (url.origin === window.location.origin && !url.pathname.startsWith("/login")) {
+        return `${url.pathname}${url.search}${url.hash}`;
+      }
+    } catch {
+      return "/dashboard";
+    }
+  }
+
+  return "/dashboard";
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { status } = useSession();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const callbackUrl = normalizeCallbackUrl(searchParams.get("callbackUrl"));
 
   useEffect(() => {
     router.prefetch("/dashboard");
-  }, [router]);
+    router.prefetch(callbackUrl);
+  }, [callbackUrl, router]);
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace(callbackUrl);
+    }
+  }, [callbackUrl, router, status]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -26,9 +59,10 @@ export default function LoginPage() {
     const result = await signIn("credentials", {
       username: username.trim().toLowerCase(),
       password,
-      redirect: false
+      redirect: false,
+      callbackUrl
     });
-    if (result?.error) {
+    if (result?.error || !result?.ok) {
       setError("Invalid username or password");
       setIsLoading(false);
       return;
@@ -38,7 +72,8 @@ export default function LoginPage() {
     } else {
       sessionStorage.removeItem("microbiz.session.remember");
     }
-    router.replace("/dashboard");
+    router.replace(normalizeCallbackUrl(result.url) || callbackUrl);
+    router.refresh();
   }
 
   return (

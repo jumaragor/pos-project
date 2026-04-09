@@ -17,17 +17,35 @@ const protectedPrefixes = [
   "/settings"
 ];
 
+function normalizeCallbackPath(raw: string | null, fallback = "/dashboard") {
+  if (!raw) return fallback;
+  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/login")) {
+    return raw;
+  }
+  return fallback;
+}
+
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
   const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
-  if (!isProtected) {
+  const isLogin = pathname === "/login";
+
+  if (!isProtected && !isLogin) {
     return NextResponse.next();
   }
 
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  if (isLogin) {
+    if (token) {
+      const callbackUrl = normalizeCallbackPath(request.nextUrl.searchParams.get("callbackUrl"));
+      return NextResponse.redirect(new URL(callbackUrl, request.url));
+    }
+    return NextResponse.next();
+  }
+
   if (!token) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
+    loginUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
     return NextResponse.redirect(loginUrl);
   }
 

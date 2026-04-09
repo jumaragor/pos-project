@@ -101,6 +101,28 @@ export const authOptions: NextAuthOptions = {
       }
       timer.end();
       return session;
+    },
+    redirect: ({ url, baseUrl }) => {
+      const timer = startPerfTimer("auth.redirect");
+      if (url.startsWith("/") && !url.startsWith("//") && !url.startsWith("/login")) {
+        const resolved = `${baseUrl}${url}`;
+        timer.end({ target: resolved });
+        return resolved;
+      }
+
+      try {
+        const target = new URL(url);
+        if (target.origin === baseUrl && !target.pathname.startsWith("/login")) {
+          timer.end({ target: target.toString() });
+          return target.toString();
+        }
+      } catch {
+        // Fall back to baseUrl below.
+      }
+
+      const fallback = `${baseUrl}/dashboard`;
+      timer.end({ target: fallback, fallback: true });
+      return fallback;
     }
   }
 };
