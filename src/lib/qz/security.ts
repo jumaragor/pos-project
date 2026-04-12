@@ -1,7 +1,7 @@
 const DEV_MODE = process.env.NODE_ENV !== "production";
 
 function normalizePem(value: string | undefined) {
-  return value?.replace(/\\n/g, "\n").trim() ?? "";
+  return value?.replace(/\r\n/g, "\n").replace(/\\n/g, "\n").trim() ?? "";
 }
 
 export function getQzCertificate() {
@@ -28,20 +28,24 @@ export async function requestQzSignature(payload: string) {
     body: JSON.stringify({ payload })
   });
 
-  const body = (await response.json().catch(() => ({}))) as {
-    signature?: string;
-    error?: string;
-  };
+  const responseText = await response.text();
+  const body = (responseText ? JSON.parse(responseText) : {}) as Record<string, unknown>;
+  const bodyError = typeof body.error === "string" ? body.error : undefined;
+  const signature = typeof body.signature === "string" ? body.signature : undefined;
 
   if (!response.ok) {
-    throw new Error(body.error ?? "Failed to sign QZ request.");
+    const errorMessage =
+      bodyError
+        ? bodyError
+        : responseText || `Failed to sign QZ request (HTTP ${response.status}).`;
+    throw new Error(errorMessage);
   }
 
-  if (!body.signature) {
+  if (!signature) {
     throw new Error("QZ signing route returned no signature.");
   }
 
-  return body.signature;
+  return signature;
 }
 
 export function applyQzSecurity(qz: {
