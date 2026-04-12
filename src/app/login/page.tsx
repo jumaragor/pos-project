@@ -2,11 +2,12 @@
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { LogoMarkIcon } from "@/components/ui/app-icons";
 import { PrimaryButton } from "@/components/ui/buttons";
+import { authClientDebug } from "@/lib/auth-debug";
 
 function normalizeCallbackUrl(raw: string | null | undefined) {
   if (!raw) return "/dashboard";
@@ -48,6 +49,7 @@ function LoginPageContent() {
 
   useEffect(() => {
     if (status === "authenticated") {
+      authClientDebug("login.redirect-authenticated", { callbackUrl });
       router.replace(callbackUrl);
     }
   }, [callbackUrl, router, status]);
@@ -62,17 +64,37 @@ function LoginPageContent() {
       redirect: false,
       callbackUrl
     });
+    authClientDebug("login.signin-result", {
+      ok: result?.ok ?? false,
+      error: result?.error ?? null,
+      url: result?.url ?? null,
+      callbackUrl
+    });
     if (result?.error || !result?.ok) {
       setError("Invalid username or password");
       setIsLoading(false);
       return;
     }
+
+    const session = await getSession();
+    authClientDebug("login.session-after-signin", {
+      hasSession: Boolean(session?.user?.id),
+      userId: session?.user?.id ?? null
+    });
+    if (!session?.user?.id) {
+      setError("Sign-in succeeded, but the session could not be established. Check production auth environment variables.");
+      setIsLoading(false);
+      return;
+    }
+
     if (!rememberMe) {
       sessionStorage.setItem("microbiz.session.remember", "false");
     } else {
       sessionStorage.removeItem("microbiz.session.remember");
     }
-    router.replace(normalizeCallbackUrl(result.url) || callbackUrl);
+    const target = normalizeCallbackUrl(result?.url) || callbackUrl;
+    authClientDebug("login.navigate", { target });
+    router.replace(target);
     router.refresh();
   }
 

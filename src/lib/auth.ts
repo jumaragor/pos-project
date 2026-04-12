@@ -3,8 +3,18 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { startPerfTimer } from "@/lib/perf";
+import { authDebug } from "@/lib/auth-debug";
+
+const resolvedAuthUrl =
+  process.env.NEXTAUTH_URL ||
+  process.env.AUTH_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined) ||
+  (process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : undefined);
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
+  useSecureCookies: process.env.NODE_ENV === "production",
+  debug: process.env.AUTH_DEBUG === "true",
   session: {
     strategy: "jwt",
     maxAge: 60 * 60 * 8,
@@ -22,8 +32,13 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         const authorizeTimer = startPerfTimer("auth.authorize");
+        authDebug("authorize.start", {
+          usernameProvided: Boolean(credentials?.username),
+          authUrl: resolvedAuthUrl ?? null
+        });
         if (!credentials?.username || !credentials.password) {
           authorizeTimer.end({ result: "missing-credentials" });
+          authDebug("authorize.missing-credentials");
           return null;
         }
         const username = credentials.username.trim().toLowerCase();
@@ -43,10 +58,12 @@ export const authOptions: NextAuthOptions = {
         userLookupTimer.end({ found: Boolean(user) });
         if (!user) {
           authorizeTimer.end({ result: "user-not-found" });
+          authDebug("authorize.user-not-found", { username });
           return null;
         }
         if (user.status !== "ACTIVE") {
           authorizeTimer.end({ result: "inactive" });
+          authDebug("authorize.inactive", { userId: user.id, status: user.status });
           return null;
         }
         const compareTimer = startPerfTimer("auth.passwordCompare");
@@ -54,6 +71,7 @@ export const authOptions: NextAuthOptions = {
         compareTimer.end({ matched });
         if (!matched) {
           authorizeTimer.end({ result: "password-mismatch" });
+          authDebug("authorize.password-mismatch", { userId: user.id });
           return null;
         }
         void prisma.user
@@ -65,6 +83,11 @@ export const authOptions: NextAuthOptions = {
             // Non-blocking audit field update only.
           });
         authorizeTimer.end({ result: "success" });
+        authDebug("authorize.success", {
+          userId: user.id,
+          role: user.role,
+          resolvedAuthUrl: resolvedAuthUrl ?? null
+        });
         return {
           id: user.id,
           name: user.name,
@@ -89,6 +112,10 @@ export const authOptions: NextAuthOptions = {
         token.status = user.status;
       }
       timer.end({ hasUser: Boolean(user) });
+      authDebug("jwt.callback", {
+        hasUser: Boolean(user),
+        tokenId: typeof token.id === "string" ? token.id : null
+      });
       return token;
     },
     session: ({ session, token }) => {
@@ -100,6 +127,10 @@ export const authOptions: NextAuthOptions = {
         session.user.status = token.status as string;
       }
       timer.end();
+      authDebug("session.callback", {
+        userId: session.user?.id ?? null,
+        role: session.user?.role ?? null
+      });
       return session;
     },
     redirect: ({ url, baseUrl }) => {
@@ -107,6 +138,7 @@ export const authOptions: NextAuthOptions = {
       if (url.startsWith("/") && !url.startsWith("//") && !url.startsWith("/login")) {
         const resolved = `${baseUrl}${url}`;
         timer.end({ target: resolved });
+        authDebug("redirect.relative", { url, baseUrl, target: resolved });
         return resolved;
       }
 
@@ -114,6 +146,7 @@ export const authOptions: NextAuthOptions = {
         const target = new URL(url);
         if (target.origin === baseUrl && !target.pathname.startsWith("/login")) {
           timer.end({ target: target.toString() });
+          authDebug("redirect.same-origin", { url, baseUrl, target: target.toString() });
           return target.toString();
         }
       } catch {
@@ -122,6 +155,7 @@ export const authOptions: NextAuthOptions = {
 
       const fallback = `${baseUrl}/dashboard`;
       timer.end({ target: fallback, fallback: true });
+      authDebug("redirect.fallback", { url, baseUrl, target: fallback });
       return fallback;
     }
   }
