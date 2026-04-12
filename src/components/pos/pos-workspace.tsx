@@ -12,6 +12,7 @@ import { CartLine, CustomerLite, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency } from "@/lib/format";
 import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
+import { printSaleReceipt } from "@/features/pos/actions/print-sale-receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
 
@@ -37,7 +38,6 @@ const defaultReceiptSettings: ReceiptSettings = {
   tin: "",
   permitNo: "",
   showCashierName: true,
-  showCustomerName: true,
   showChangeAmount: true,
   enableTax: true,
   defaultTaxRate: 12,
@@ -53,13 +53,16 @@ export function PosWorkspace({
   customers: CustomerLite[];
 }) {
   const { data: session } = useSession();
-  const { success } = useToast();
+  const { success, error: showError, info } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
   const [enableProductCategories, setEnableProductCategories] = useState(true);
   const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(true);
   const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(true);
   const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
+  const [receiptPrinterName, setReceiptPrinterName] = useState("");
+  const [browserPrintFallback, setBrowserPrintFallback] = useState(true);
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
   const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
@@ -126,6 +129,9 @@ export function PosWorkspace({
       setAllowProductPhotoUpload(payload.allowProductPhotoUpload !== false);
       setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
+      setAutoPrintReceipt(payload.autoPrintReceipt === true);
+      setReceiptPrinterName(String(payload.receiptPrinterName ?? ""));
+      setBrowserPrintFallback(payload.browserPrintFallback !== false);
       setReceiptSettings({
         businessName: String(payload.businessName ?? ""),
         storeName: String(payload.storeName ?? "MicroBiz POS"),
@@ -137,7 +143,6 @@ export function PosWorkspace({
         tin: String(payload.tin ?? ""),
         permitNo: String(payload.permitNo ?? ""),
         showCashierName: payload.showCashierName !== false,
-        showCustomerName: payload.showCustomerName !== false,
         showChangeAmount: payload.showChangeAmount !== false,
         enableTax: payload.enableTax !== false,
         defaultTaxRate: Number(payload.defaultTaxRate ?? 12),
@@ -221,11 +226,33 @@ export function PosWorkspace({
     };
   }
 
-  function printSaleTransaction(sale: ReceiptRecord | null = completedSale) {
-    if (!sale) return;
-    setCompletedSale(sale);
-    window.print();
-    success("Transaction printed successfully");
+  function printViaBrowser({ sale }: { receipt: ReturnType<typeof buildReceiptData>; sale: ReceiptRecord }) {
+    return new Promise<void>((resolve) => {
+      setCompletedSale(sale);
+      window.setTimeout(() => {
+        window.print();
+        resolve();
+      }, 50);
+    });
+  }
+
+  async function runReceiptPrint(sale: ReceiptRecord) {
+    const result = await printSaleReceipt({
+      sale,
+      settings: {
+        receiptSettings,
+        preferredPrinterName: receiptPrinterName,
+        browserPrintFallback
+      },
+      onBrowserPrint: printViaBrowser
+    });
+
+    if (result.mode === "qz") {
+      success(`Receipt sent to ${result.printer}`);
+      return;
+    }
+
+    info("QZ Tray unavailable. Opened browser print instead.");
   }
 
   async function loadReceiptRecord(transactionId: string) {
@@ -315,9 +342,13 @@ export function PosWorkspace({
       await loadTransactions();
       success(`Sale ${data.number} completed`);
       inputRef.current?.focus();
-      window.setTimeout(() => {
-        printSaleTransaction(snapshot);
-      }, 50);
+      if (autoPrintReceipt) {
+        try {
+          await runReceiptPrint(snapshot);
+        } catch (printError) {
+          showError(printError instanceof Error ? printError.message : "Failed to print receipt");
+        }
+      }
     } finally {
       setIsConfirmingCheckout(false);
     }
@@ -394,11 +425,9 @@ export function PosWorkspace({
   async function printTransaction(transactionId: string) {
     try {
       const receipt = await loadReceiptRecord(transactionId);
-      window.setTimeout(() => {
-        printSaleTransaction(receipt);
-      }, 50);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Failed to print receipt");
+      await runReceiptPrint(receipt);
+    } catch (loadError) {
+      showError(loadError instanceof Error ? loadError.message : "Failed to print receipt");
     }
   }
 
@@ -559,7 +588,6 @@ export function PosWorkspace({
         }}
         onConfirm={completeSale}
       />
-
       {printableReceipt ? <ReceiptPrint data={printableReceipt} /> : null}
     </div>
   );

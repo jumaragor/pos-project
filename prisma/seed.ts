@@ -60,17 +60,6 @@ async function main() {
     }
   });
 
-  await prisma.unitConversionRule.createMany({
-    data: [
-      {
-        fromUnit: "box",
-        toUnit: "pc",
-        factor: "12"
-      }
-    ],
-    skipDuplicates: true
-  });
-
   await prisma.appSetting.upsert({
     where: { key: "allowNegativeStock" },
     update: {},
