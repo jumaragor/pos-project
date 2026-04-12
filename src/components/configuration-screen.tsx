@@ -79,8 +79,6 @@ type SettingsShape = {
   allowPriceOverride: boolean;
   allowDiscountEntry: boolean;
   autoPrintReceipt: boolean;
-  receiptPrinterName: string;
-  browserPrintFallback: boolean;
   showCashierName: boolean;
   showChangeAmount: boolean;
   defaultPaymentMethod: "CASH" | "GCASH" | "CARD";
@@ -135,8 +133,6 @@ const defaultSettings: SettingsShape = {
   allowPriceOverride: false,
   allowDiscountEntry: true,
   autoPrintReceipt: false,
-  receiptPrinterName: "",
-  browserPrintFallback: true,
   showCashierName: true,
   showChangeAmount: true,
   defaultPaymentMethod: "CASH",
@@ -663,13 +659,11 @@ export function ConfigurationScreen() {
             <label className="configuration-check"><input type="checkbox" checked={settings.allowPriceOverride} onChange={(e) => setSettings((p) => ({ ...p, allowPriceOverride: e.target.checked }))} />Allow Price Override</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.allowDiscountEntry} onChange={(e) => setSettings((p) => ({ ...p, allowDiscountEntry: e.target.checked }))} />Allow Discount Entry</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.autoPrintReceipt} onChange={(e) => setSettings((p) => ({ ...p, autoPrintReceipt: e.target.checked }))} />Auto Print Receipt</label>
-            <label className="form-field"><span className="field-label">Preferred Receipt Printer</span><input value={settings.receiptPrinterName} placeholder="Leave blank to use system default" onChange={(e) => setSettings((p) => ({ ...p, receiptPrinterName: e.target.value }))} /></label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.browserPrintFallback} onChange={(e) => setSettings((p) => ({ ...p, browserPrintFallback: e.target.checked }))} />Fallback to Browser Print if QZ is unavailable</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.showCashierName} onChange={(e) => setSettings((p) => ({ ...p, showCashierName: e.target.checked }))} />Show Cashier Name on Receipt</label>
             <label className="configuration-check"><input type="checkbox" checked={settings.showChangeAmount} onChange={(e) => setSettings((p) => ({ ...p, showChangeAmount: e.target.checked }))} />Show Change Amount on Receipt</label>
             <label className="form-field"><span className="field-label">Default Payment Method</span><select value={settings.defaultPaymentMethod} onChange={(e) => setSettings((p) => ({ ...p, defaultPaymentMethod: e.target.value as SettingsShape["defaultPaymentMethod"] }))}><option value="CASH">Cash</option><option value="GCASH">GCash</option><option value="CARD">Card</option></select></label>
             <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "receiptPrinterName", "browserPrintFallback", "showCashierName", "showChangeAmount", "defaultPaymentMethod"])}>
+              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "showCashierName", "showChangeAmount", "defaultPaymentMethod"])}>
                 Save Changes
               </PrimaryButton>
             </div>

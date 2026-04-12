@@ -12,7 +12,6 @@ import { CartLine, CustomerLite, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency } from "@/lib/format";
 import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
-import { printSaleReceipt } from "@/features/pos/actions/print-sale-receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
 
@@ -53,7 +52,7 @@ export function PosWorkspace({
   customers: CustomerLite[];
 }) {
   const { data: session } = useSession();
-  const { success, error: showError, info } = useToast();
+  const { success } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
   const [enableProductCategories, setEnableProductCategories] = useState(true);
   const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(true);
@@ -61,8 +60,6 @@ export function PosWorkspace({
   const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
-  const [receiptPrinterName, setReceiptPrinterName] = useState("");
-  const [browserPrintFallback, setBrowserPrintFallback] = useState(true);
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
   const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
@@ -130,8 +127,6 @@ export function PosWorkspace({
       setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
       setAutoPrintReceipt(payload.autoPrintReceipt === true);
-      setReceiptPrinterName(String(payload.receiptPrinterName ?? ""));
-      setBrowserPrintFallback(payload.browserPrintFallback !== false);
       setReceiptSettings({
         businessName: String(payload.businessName ?? ""),
         storeName: String(payload.storeName ?? "MicroBiz POS"),
@@ -226,33 +221,11 @@ export function PosWorkspace({
     };
   }
 
-  function printViaBrowser({ sale }: { receipt: ReturnType<typeof buildReceiptData>; sale: ReceiptRecord }) {
-    return new Promise<void>((resolve) => {
-      setCompletedSale(sale);
-      window.setTimeout(() => {
-        window.print();
-        resolve();
-      }, 50);
-    });
-  }
-
-  async function runReceiptPrint(sale: ReceiptRecord) {
-    const result = await printSaleReceipt({
-      sale,
-      settings: {
-        receiptSettings,
-        preferredPrinterName: receiptPrinterName,
-        browserPrintFallback
-      },
-      onBrowserPrint: printViaBrowser
-    });
-
-    if (result.mode === "qz") {
-      success(`Receipt sent to ${result.printer}`);
-      return;
-    }
-
-    info("QZ Tray unavailable. Opened browser print instead.");
+  function printSaleTransaction(sale: ReceiptRecord | null = completedSale) {
+    if (!sale) return;
+    setCompletedSale(sale);
+    window.print();
+    success("Transaction printed successfully");
   }
 
   async function loadReceiptRecord(transactionId: string) {
@@ -343,11 +316,9 @@ export function PosWorkspace({
       success(`Sale ${data.number} completed`);
       inputRef.current?.focus();
       if (autoPrintReceipt) {
-        try {
-          await runReceiptPrint(snapshot);
-        } catch (printError) {
-          showError(printError instanceof Error ? printError.message : "Failed to print receipt");
-        }
+        window.setTimeout(() => {
+          printSaleTransaction(snapshot);
+        }, 50);
       }
     } finally {
       setIsConfirmingCheckout(false);
@@ -425,9 +396,11 @@ export function PosWorkspace({
   async function printTransaction(transactionId: string) {
     try {
       const receipt = await loadReceiptRecord(transactionId);
-      await runReceiptPrint(receipt);
+      window.setTimeout(() => {
+        printSaleTransaction(receipt);
+      }, 50);
     } catch (loadError) {
-      showError(loadError instanceof Error ? loadError.message : "Failed to print receipt");
+      alert(loadError instanceof Error ? loadError.message : "Failed to print receipt");
     }
   }
 

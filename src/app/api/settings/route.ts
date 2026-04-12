@@ -21,8 +21,6 @@ const defaultSettings: Record<string, string> = {
   allowPriceOverride: "false",
   allowDiscountEntry: "true",
   autoPrintReceipt: "false",
-  receiptPrinterName: "",
-  browserPrintFallback: "true",
   showCashierName: "true",
   showChangeAmount: "true",
   defaultPaymentMethod: "CASH",
