@@ -30,7 +30,6 @@ function formatReceiptMetaRow(left: string, right?: string) {
 
 function ReceiptCopy({ data }: { data: ReceiptData }) {
   const formattedDate = new Date(data.createdAt);
-  const footerNote = "This is not an official receipt";
   const metaRows = [
     formatReceiptMetaRow(
       formattedDate.toLocaleDateString("en-PH"),
@@ -117,10 +116,7 @@ function ReceiptCopy({ data }: { data: ReceiptData }) {
         </div>
       ) : null}
       <div className="receipt-divider" />
-      <div className="receipt-foot">{footerNote}</div>
-      {data.footerMessage && data.footerMessage !== footerNote ? (
-        <div className="receipt-foot">{data.footerMessage}</div>
-      ) : null}
+      {data.footerMessage ? <div className="receipt-foot">{data.footerMessage}</div> : null}
     </section>
   );
 }

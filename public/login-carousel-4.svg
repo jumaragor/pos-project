@@ -1,0 +1,33 @@
+<svg width="1600" height="1200" viewBox="0 0 1600 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="1200" fill="#08121F"/>
+  <rect width="1600" height="1200" fill="url(#bg4)"/>
+  <circle cx="1316" cy="194" r="214" fill="#22D3EE" fill-opacity="0.18"/>
+  <circle cx="266" cy="1008" r="276" fill="#60A5FA" fill-opacity="0.18"/>
+  <rect x="118" y="122" width="1364" height="956" rx="40" fill="#0D1A2B" fill-opacity="0.9" stroke="#E2E8F0" stroke-opacity="0.14" stroke-width="2"/>
+  <rect x="188" y="194" width="542" height="444" rx="30" fill="#F8FAFC"/>
+  <rect x="774" y="194" width="638" height="444" rx="30" fill="#10233A"/>
+  <rect x="188" y="682" width="1224" height="326" rx="34" fill="#0B1A2B"/>
+  <rect x="258" y="262" width="204" height="242" rx="24" fill="#DCEBFF"/>
+  <rect x="490" y="262" width="170" height="242" rx="24" fill="#FDE68A"/>
+  <rect x="294" y="298" width="132" height="24" rx="12" fill="#1E3A8A"/>
+  <rect x="294" y="346" width="84" height="84" rx="18" fill="#0F172A"/>
+  <rect x="836" y="260" width="176" height="312" rx="26" fill="#1D4ED8"/>
+  <rect x="1040" y="260" width="176" height="312" rx="26" fill="#38BDF8"/>
+  <rect x="1244" y="260" width="104" height="312" rx="26" fill="#34D399"/>
+  <rect x="286" y="756" width="296" height="178" rx="24" fill="#122841"/>
+  <rect x="652" y="756" width="296" height="178" rx="24" fill="#122841"/>
+  <rect x="1018" y="756" width="296" height="178" rx="24" fill="#122841"/>
+  <rect x="324" y="802" width="220" height="20" rx="10" fill="#E2E8F0"/>
+  <rect x="324" y="844" width="144" height="20" rx="10" fill="#93C5FD"/>
+  <rect x="690" y="802" width="220" height="20" rx="10" fill="#E2E8F0"/>
+  <rect x="690" y="844" width="170" height="20" rx="10" fill="#A7F3D0"/>
+  <rect x="1056" y="802" width="220" height="20" rx="10" fill="#E2E8F0"/>
+  <rect x="1056" y="844" width="160" height="20" rx="10" fill="#FDE68A"/>
+  <defs>
+    <linearGradient id="bg4" x1="138" y1="105" x2="1459" y2="1094" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#091220"/>
+      <stop offset="0.48" stop-color="#12304D"/>
+      <stop offset="1" stop-color="#0A1624"/>
+    </linearGradient>
+  </defs>
+</svg>

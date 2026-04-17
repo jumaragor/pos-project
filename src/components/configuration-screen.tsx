@@ -63,6 +63,14 @@ type CategoryForm = {
   sortOrder: number;
 };
 
+type LoginCarouselImageSetting = {
+  id: string;
+  url: string;
+  alt: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
 type SettingsShape = {
   allowNegativeStock: boolean;
   lowStockThreshold: number;
@@ -99,6 +107,7 @@ type SettingsShape = {
   dateFormat: "MM/DD/YYYY" | "DD/MM/YYYY" | "YYYY-MM-DD";
   numberFormat: "1,000.00" | "1.000,00";
   timezone: string;
+  loginCarouselImages: LoginCarouselImageSetting[];
   themePreset: ThemePresetKey;
   themePrimaryColor: string;
   themeAccentColor: string;
@@ -142,7 +151,7 @@ const defaultSettings: SettingsShape = {
   storeContactNumber: "",
   storeEmailAddress: "",
   storeLogoUrl: "",
-  receiptFooterMessage: "Thank you for shopping!",
+  receiptFooterMessage: "",
   tin: "",
   permitNo: "",
   enableProductCategories: true,
@@ -153,6 +162,7 @@ const defaultSettings: SettingsShape = {
   dateFormat: "MM/DD/YYYY",
   numberFormat: "1,000.00",
   timezone: "Asia/Manila",
+  loginCarouselImages: [],
   themePreset: "DEFAULT_NAVY",
   themePrimaryColor: defaultThemeValues.themePrimaryColor,
   themeAccentColor: defaultThemeValues.themeAccentColor,
@@ -189,6 +199,44 @@ function toApiRole(role: "ADMIN" | "CASHIER") {
 function formatLastLogin(value: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-PH");
+}
+
+function createCarouselImageEntry(order: number): LoginCarouselImageSetting {
+  return {
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `login-carousel-${Date.now()}-${order}`,
+    url: "",
+    alt: "",
+    sortOrder: order,
+    isActive: true
+  };
+}
+
+function normalizeCarouselImages(images: LoginCarouselImageSetting[]) {
+  return [...images]
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((image, index) => ({
+      ...image,
+      id: image.id || `login-carousel-${index + 1}`,
+      url: image.url.trim(),
+      alt: image.alt.trim(),
+      sortOrder: index
+    }));
+}
+
+function isLikelyImageUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+
+  try {
+    const url = new URL(trimmed);
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    return /\.(avif|gif|jpe?g|png|svg|webp|bmp|ico)$/i.test(url.pathname) || url.search.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 const themePresetOptions: Array<{ value: ThemePresetKey; label: string }> = [
@@ -504,11 +552,19 @@ export function ConfigurationScreen() {
 
   async function saveSystemSettings() {
     if (!validateThemeValues()) return;
+    const invalidCarouselImage = settings.loginCarouselImages.find(
+      (image) => image.url.trim() && !isLikelyImageUrl(image.url)
+    );
+    if (invalidCarouselImage) {
+      alert("Each login carousel entry must use a direct image URL.");
+      return;
+    }
     await saveSettings([
       "currency",
       "dateFormat",
       "numberFormat",
       "timezone",
+      "loginCarouselImages",
       "themePreset",
       "themePrimaryColor",
       "themeAccentColor",
@@ -516,6 +572,60 @@ export function ConfigurationScreen() {
       "themeDangerColor"
     ]);
     applyThemePreview();
+  }
+
+  function updateCarouselImage(
+    imageId: string,
+    field: keyof Pick<LoginCarouselImageSetting, "url" | "alt" | "sortOrder" | "isActive">,
+    value: string | number | boolean
+  ) {
+    setSettings((prev) => ({
+      ...prev,
+      loginCarouselImages: normalizeCarouselImages(
+        prev.loginCarouselImages.map((image) =>
+          image.id === imageId ? { ...image, [field]: value } : image
+        )
+      )
+    }));
+  }
+
+  function addCarouselImage() {
+    setSettings((prev) => ({
+      ...prev,
+      loginCarouselImages: normalizeCarouselImages([
+        ...prev.loginCarouselImages,
+        createCarouselImageEntry(prev.loginCarouselImages.length)
+      ])
+    }));
+  }
+
+  function removeCarouselImage(imageId: string) {
+    setSettings((prev) => ({
+      ...prev,
+      loginCarouselImages: normalizeCarouselImages(
+        prev.loginCarouselImages.filter((image) => image.id !== imageId)
+      )
+    }));
+  }
+
+  function moveCarouselImage(imageId: string, direction: -1 | 1) {
+    setSettings((prev) => {
+      const nextImages = normalizeCarouselImages(prev.loginCarouselImages);
+      const currentIndex = nextImages.findIndex((image) => image.id === imageId);
+      const targetIndex = currentIndex + direction;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= nextImages.length) {
+        return prev;
+      }
+
+      const reordered = [...nextImages];
+      const [currentImage] = reordered.splice(currentIndex, 1);
+      reordered.splice(targetIndex, 0, currentImage);
+
+      return {
+        ...prev,
+        loginCarouselImages: normalizeCarouselImages(reordered)
+      };
+    });
   }
 
   function renderContent() {
@@ -782,6 +892,117 @@ export function ConfigurationScreen() {
             <label className="form-field"><span className="field-label">Date Format</span><select value={settings.dateFormat} onChange={(e) => setSettings((p) => ({ ...p, dateFormat: e.target.value as SettingsShape["dateFormat"] }))}><option value="MM/DD/YYYY">MM/DD/YYYY</option><option value="DD/MM/YYYY">DD/MM/YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></label>
             <label className="form-field"><span className="field-label">Number Format</span><select value={settings.numberFormat} onChange={(e) => setSettings((p) => ({ ...p, numberFormat: e.target.value as SettingsShape["numberFormat"] }))}><option value="1,000.00">1,000.00</option><option value="1.000,00">1.000,00</option></select></label>
             <label className="form-field"><span className="field-label">Timezone</span><input value={settings.timezone} onChange={(e) => setSettings((p) => ({ ...p, timezone: e.target.value }))} /></label>
+
+            <div className="configuration-theme-block">
+              <div className="configuration-block-head">
+                <div>
+                  <h3 className="section-title configuration-subtitle">Login Carousel Images</h3>
+                  <div className="field-help">Add direct image URLs to display on the login page carousel.</div>
+                </div>
+                <SecondaryButton className="configuration-inline-btn" onClick={addCarouselImage}>+ Add Image</SecondaryButton>
+              </div>
+
+              <div className="configuration-carousel-list">
+                {settings.loginCarouselImages.map((image, index) => {
+                  const hasUrl = image.url.trim().length > 0;
+                  const urlLooksValid = !hasUrl || isLikelyImageUrl(image.url);
+
+                  return (
+                    <div key={image.id} className="configuration-carousel-item">
+                      <div className="configuration-carousel-thumb-shell">
+                        {hasUrl && urlLooksValid ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={image.url}
+                            alt={image.alt || `Carousel preview ${index + 1}`}
+                            className="configuration-carousel-thumb"
+                          />
+                        ) : (
+                          <div className="configuration-carousel-thumb configuration-carousel-thumb-empty">
+                            Preview
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="configuration-carousel-fields">
+                        <div className="grid grid-2">
+                          <label className="form-field">
+                            <span className="field-label">Image URL</span>
+                            <input
+                              value={image.url}
+                              placeholder="https://example.com/slide.jpg"
+                              onChange={(e) => updateCarouselImage(image.id, "url", e.target.value)}
+                            />
+                            {!urlLooksValid ? <div className="field-help configuration-warning-text">Use a direct image URL ending in jpg, png, svg, webp, or similar.</div> : null}
+                          </label>
+                          <label className="form-field">
+                            <span className="field-label">Alt Text / Label</span>
+                            <input
+                              value={image.alt}
+                              placeholder="Optional description"
+                              onChange={(e) => updateCarouselImage(image.id, "alt", e.target.value)}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="configuration-carousel-meta">
+                          <label className="form-field configuration-carousel-order">
+                            <span className="field-label">Display Order</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={image.sortOrder}
+                              onChange={(e) =>
+                                updateCarouselImage(
+                                  image.id,
+                                  "sortOrder",
+                                  Number(e.target.value) || 0
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="configuration-check">
+                            <input
+                              type="checkbox"
+                              checked={image.isActive}
+                              onChange={(e) => updateCarouselImage(image.id, "isActive", e.target.checked)}
+                            />
+                            Active
+                          </label>
+                          <div className="configuration-carousel-actions">
+                            <SecondaryButton
+                              className="configuration-inline-btn"
+                              onClick={() => moveCarouselImage(image.id, -1)}
+                            >
+                              Up
+                            </SecondaryButton>
+                            <SecondaryButton
+                              className="configuration-inline-btn"
+                              onClick={() => moveCarouselImage(image.id, 1)}
+                            >
+                              Down
+                            </SecondaryButton>
+                            <button
+                              type="button"
+                              className="btn-danger configuration-inline-btn"
+                              onClick={() => removeCarouselImage(image.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {!settings.loginCarouselImages.length ? (
+                  <div className="configuration-carousel-empty">
+                    No custom login carousel images yet. The login page will use default placeholder slides until you add some.
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             <div className="configuration-theme-block">
               <h3 className="section-title configuration-subtitle">Theme Customization</h3>

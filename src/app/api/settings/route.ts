@@ -5,6 +5,14 @@ import { getAuthUser } from "@/lib/api-auth";
 import { invalidateInventorySettingsCache } from "@/lib/inventory-settings";
 import { invalidateProductSettingsCache } from "@/lib/product-settings";
 
+type LoginCarouselImageSetting = {
+  id: string;
+  url: string;
+  alt: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
 const defaultSettings: Record<string, string> = {
   allowNegativeStock: "false",
   lowStockThreshold: "10",
@@ -30,7 +38,7 @@ const defaultSettings: Record<string, string> = {
   storeContactNumber: "",
   storeEmailAddress: "",
   storeLogoUrl: "",
-  receiptFooterMessage: "Thank you for shopping!",
+  receiptFooterMessage: "",
   tin: "",
   permitNo: "",
   enableProductCategories: "true",
@@ -41,6 +49,7 @@ const defaultSettings: Record<string, string> = {
   dateFormat: "MM/DD/YYYY",
   numberFormat: "1,000.00",
   timezone: "Asia/Manila",
+  loginCarouselImages: "[]",
   themePreset: "DEFAULT_NAVY",
   themePrimaryColor: "#0F172A",
   themeAccentColor: "#2563EB",
@@ -48,11 +57,54 @@ const defaultSettings: Record<string, string> = {
   themeDangerColor: "#DC2626"
 };
 
-function coerceValue(raw: string) {
+function sanitizeLoginCarouselImages(raw: unknown): LoginCarouselImageSetting[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const url = typeof record.url === "string" ? record.url.trim() : "";
+      if (!url) return null;
+
+      return {
+        id:
+          typeof record.id === "string" && record.id.trim()
+            ? record.id.trim()
+            : `login-carousel-${index + 1}`,
+        url,
+        alt: typeof record.alt === "string" ? record.alt.trim() : "",
+        sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : index,
+        isActive: record.isActive !== false
+      } satisfies LoginCarouselImageSetting;
+    })
+    .filter((item): item is LoginCarouselImageSetting => Boolean(item))
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((item, index) => ({
+      ...item,
+      sortOrder: index
+    }));
+}
+
+function coerceValue(key: string, raw: string) {
+  if (key === "loginCarouselImages") {
+    try {
+      return sanitizeLoginCarouselImages(JSON.parse(raw));
+    } catch {
+      return [];
+    }
+  }
   if (raw === "true") return true;
   if (raw === "false") return false;
   if (raw !== "" && Number.isFinite(Number(raw))) return Number(raw);
   return raw;
+}
+
+function serializeValue(key: string, value: unknown) {
+  if (key === "loginCarouselImages") {
+    return JSON.stringify(sanitizeLoginCarouselImages(value));
+  }
+  return String(value ?? "");
 }
 
 export async function GET() {
@@ -61,7 +113,7 @@ export async function GET() {
   });
   const valueByKey = new Map(settings.map((setting) => [setting.key, setting.value]));
   const payload = Object.fromEntries(
-    Object.entries(defaultSettings).map(([key, fallback]) => [key, coerceValue(valueByKey.get(key) ?? fallback)])
+    Object.entries(defaultSettings).map(([key, fallback]) => [key, coerceValue(key, valueByKey.get(key) ?? fallback)])
   );
   return ok(payload);
 }
@@ -80,8 +132,8 @@ export async function PUT(request: NextRequest) {
     incomingEntries.map(([key, value]) =>
       prisma.appSetting.upsert({
         where: { key },
-        update: { value: String(value ?? "") },
-        create: { key, value: String(value ?? "") }
+        update: { value: serializeValue(key, value) },
+        create: { key, value: serializeValue(key, value) }
       })
     )
   );
@@ -92,7 +144,7 @@ export async function PUT(request: NextRequest) {
   });
   const valueByKey = new Map(refreshed.map((setting) => [setting.key, setting.value]));
   const payload = Object.fromEntries(
-    Object.entries(defaultSettings).map(([key, fallback]) => [key, coerceValue(valueByKey.get(key) ?? fallback)])
+    Object.entries(defaultSettings).map(([key, fallback]) => [key, coerceValue(key, valueByKey.get(key) ?? fallback)])
   );
   return ok(payload);
 }
