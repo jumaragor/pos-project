@@ -23,6 +23,7 @@ type TransactionRow = {
   status: string;
   totalAmount: string;
   createdAt?: string;
+  user?: { name?: string | null; username?: string | null } | null;
   customer?: { name: string } | null;
 };
 
@@ -44,6 +45,69 @@ const defaultReceiptSettings: ReceiptSettings = {
   taxInclusivePricing: false
 };
 
+function normalizeSearchText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function tokenizeSearchText(value: string | null | undefined) {
+  const normalized = normalizeSearchText(value);
+  return normalized ? normalized.split(" ") : [];
+}
+
+function matchesOrderedPrefixTokens(queryTokens: string[], targetTokens: string[]) {
+  if (!queryTokens.length) return true;
+  if (!targetTokens.length) return false;
+
+  let targetIndex = 0;
+
+  for (const queryToken of queryTokens) {
+    let matched = false;
+
+    while (targetIndex < targetTokens.length) {
+      if (targetTokens[targetIndex].startsWith(queryToken)) {
+        matched = true;
+        targetIndex += 1;
+        break;
+      }
+      targetIndex += 1;
+    }
+
+    if (!matched) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function matchesPosProductQuery(product: ProductLite, rawQuery: string) {
+  const trimmedQuery = rawQuery.trim();
+  if (!trimmedQuery) return true;
+
+  const normalizedQuery = normalizeSearchText(trimmedQuery);
+  const queryTokens = tokenizeSearchText(trimmedQuery);
+  const normalizedName = normalizeSearchText(product.name);
+  const normalizedSku = normalizeSearchText(product.sku);
+  const normalizedBarcode = normalizeSearchText(product.barcode);
+
+  if (
+    normalizedName.includes(normalizedQuery) ||
+    normalizedSku.includes(normalizedQuery) ||
+    normalizedBarcode.includes(normalizedQuery)
+  ) {
+    return true;
+  }
+
+  return (
+    matchesOrderedPrefixTokens(queryTokens, tokenizeSearchText(product.name)) ||
+    matchesOrderedPrefixTokens(queryTokens, tokenizeSearchText(product.sku))
+  );
+}
+
 export function PosWorkspace({
   products,
   customers
@@ -59,6 +123,7 @@ export function PosWorkspace({
   const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(true);
   const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [allowDiscountEntry, setAllowDiscountEntry] = useState(true);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
   const [activeCategory, setActiveCategory] = useState("All");
@@ -67,6 +132,7 @@ export function PosWorkspace({
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeDraftNumber, setActiveDraftNumber] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [discountInput, setDiscountInput] = useState("");
   const [completedSale, setCompletedSale] = useState<ReceiptRecord | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [isConfirmingCheckout, setIsConfirmingCheckout] = useState(false);
@@ -74,15 +140,11 @@ export function PosWorkspace({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredProducts = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     return products.filter((product) => {
       const categoryMatch =
         !enableProductCategories || activeCategory === "All" || product.category === activeCategory;
-      const queryMatch =
-        !q ||
-        product.name.toLowerCase().includes(q) ||
-        product.sku.toLowerCase().includes(q) ||
-        product.barcode?.toLowerCase().includes(q);
+      const queryMatch = matchesPosProductQuery(product, q);
       return categoryMatch && queryMatch;
     });
   }, [activeCategory, enableProductCategories, products, query]);
@@ -95,8 +157,10 @@ export function PosWorkspace({
   const compactCategoryFilters = visibleCategories.length <= 4;
 
   const subtotal = cart.reduce((acc, line) => acc + line.qty * line.price, 0);
-  const total = subtotal;
-  const discount = 0;
+  const parsedDiscount = Math.max(0, Number(discountInput || 0));
+  const discount = allowDiscountEntry ? Math.min(parsedDiscount, subtotal) : 0;
+  const discountInvalid = allowDiscountEntry && parsedDiscount > subtotal;
+  const total = Math.max(subtotal - discount, 0);
   const totalItems = cart.reduce((acc, line) => acc + line.qty, 0);
   const printableReceipt = useMemo(
     () => (completedSale ? buildReceiptData(completedSale, receiptSettings) : null),
@@ -126,6 +190,7 @@ export function PosWorkspace({
       setAllowProductPhotoUpload(payload.allowProductPhotoUpload !== false);
       setEnableLowStockAlerts(payload.enableLowStockAlerts !== false);
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
+      setAllowDiscountEntry(payload.allowDiscountEntry !== false);
       setAutoPrintReceipt(payload.autoPrintReceipt === true);
       setReceiptSettings({
         businessName: String(payload.businessName ?? ""),
@@ -183,6 +248,7 @@ export function PosWorkspace({
 
   function resetOrderState() {
     setCart([]);
+    setDiscountInput("");
     setCustomerId("");
     setActiveDraftId(null);
     setActiveDraftNumber(null);
@@ -225,7 +291,6 @@ export function PosWorkspace({
     if (!sale) return;
     setCompletedSale(sale);
     window.print();
-    success("Transaction printed successfully");
   }
 
   async function loadReceiptRecord(transactionId: string) {
@@ -261,6 +326,10 @@ export function PosWorkspace({
 
   async function completeSale(amountPaid: number) {
     if (!cart.length) return;
+    if (discountInvalid) {
+      alert("Discount cannot be greater than the subtotal.");
+      return;
+    }
     if (amountPaid < total) {
       alert("Insufficient amount");
       return;
@@ -273,6 +342,7 @@ export function PosWorkspace({
       paymentMethod: PaymentMethod.CASH,
       cashAmount: amountPaid,
       draftId: activeDraftId || undefined,
+      orderDiscount: discount > 0 ? { type: "FIXED" as const, value: discount } : undefined,
       items: cart.map((line) => ({
         productId: line.productId,
         qty: line.qty,
@@ -334,6 +404,7 @@ export function PosWorkspace({
         customerId: customerId || undefined,
         paymentMethod: PaymentMethod.CASH,
         draftId: activeDraftId || undefined,
+        orderDiscount: discount > 0 ? { type: "FIXED" as const, value: discount } : undefined,
         items: cart.map((line) => ({
           productId: line.productId,
           qty: line.qty,
@@ -371,6 +442,9 @@ export function PosWorkspace({
         qty: Number(item.qty),
         price: Number(item.price)
       }))
+    );
+    setDiscountInput(
+      Number(data.discountTotal ?? 0) > 0 ? String(Number(data.discountTotal).toFixed(2)) : ""
     );
     setCompletedSale(null);
     setCheckoutOpen(false);
@@ -503,7 +577,10 @@ export function PosWorkspace({
                   <th>Status</th>
                   <th>Total</th>
                   <th>Date</th>
-                  <th>Actions</th>
+                  <th>Cashier</th>
+                  <th className="pos-actions-header">
+                    <div className="pos-actions-header-inner">Actions</div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -513,15 +590,16 @@ export function PosWorkspace({
                     <td>{row.status === TransactionStatus.DRAFT ? "HELD" : row.status}</td>
                     <td>{formatCurrency(row.totalAmount)}</td>
                     <td>{row.createdAt ? new Date(row.createdAt).toLocaleString("en-PH") : "-"}</td>
-                    <td>
+                    <td>{row.user?.name?.trim() || row.user?.username?.trim() || "-"}</td>
+                    <td className="pos-actions-cell">
                       {row.status === TransactionStatus.DRAFT ? (
-                        <div className="row">
+                        <div className="pos-actions-group">
                           <button className="btn-secondary" onClick={() => void resumeHeldOrder(row.id)}>
                             Resume
                           </button>
                         </div>
                       ) : session?.user.role === "OWNER" || session?.user.role === "MANAGER" ? (
-                        <div className="row">
+                        <div className="pos-actions-group">
                           <button className="btn-secondary" onClick={() => void printTransaction(row.id)}>
                             {row.status === TransactionStatus.COMPLETED ? "Print" : "Reprint"}
                           </button>
@@ -533,7 +611,7 @@ export function PosWorkspace({
                           </button>
                         </div>
                       ) : row.status === TransactionStatus.COMPLETED || row.status === TransactionStatus.REFUNDED || row.status === TransactionStatus.VOID ? (
-                        <div className="row">
+                        <div className="pos-actions-group">
                           <button className="btn-secondary" onClick={() => void printTransaction(row.id)}>
                             {row.status === TransactionStatus.COMPLETED ? "Print" : "Reprint"}
                           </button>
@@ -552,13 +630,19 @@ export function PosWorkspace({
 
       <CheckoutModal
         open={checkoutOpen}
+        subtotal={subtotal}
         total={total}
+        allowDiscountEntry={allowDiscountEntry}
+        discountInput={discountInput}
+        discountAmount={discount}
+        discountInvalid={discountInvalid}
         itemCount={totalItems}
         confirming={isConfirmingCheckout}
         onClose={() => {
           if (isConfirmingCheckout) return;
           setCheckoutOpen(false);
         }}
+        onDiscountInputChange={setDiscountInput}
         onConfirm={completeSale}
       />
       {printableReceipt ? <ReceiptPrint data={printableReceipt} /> : null}

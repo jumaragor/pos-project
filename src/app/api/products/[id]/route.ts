@@ -18,6 +18,23 @@ function normalizeOptionalText(value: unknown) {
   return trimmed ? trimmed : null;
 }
 
+async function resolveAssignableUom(uomId: unknown, existingUomId: string | null) {
+  const normalizedUomId = typeof uomId === "string" && uomId.trim() ? uomId.trim() : null;
+  if (!normalizedUomId) return null;
+
+  const uom = await prisma.unitOfMeasure.findUnique({
+    where: { id: normalizedUomId },
+    select: { id: true, isActive: true }
+  });
+  if (!uom) {
+    throw new Error("Selected UOM does not exist");
+  }
+  if (!uom.isActive && existingUomId !== normalizedUomId) {
+    throw new Error("Inactive UOMs cannot be assigned to products");
+  }
+  return uom;
+}
+
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const actor = await getAuthUser();
@@ -40,6 +57,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return badRequest("Product not found");
     }
     const categoryId = typeof body.categoryId === "string" && body.categoryId.trim() ? body.categoryId : null;
+    const uom = await resolveAssignableUom(body.uomId, existingProduct.uomId);
     const category = categoryId
       ? await prisma.category.findUnique({
           where: { id: categoryId },
@@ -80,6 +98,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
           : existingProduct.compatibleUnits,
         barcode: normalizedBarcode,
         photoUrl: body.photoUrl,
+        uomId: uom?.id ?? null,
         categoryId: settings.enableProductCategories ? categoryId : existingProduct.categoryId,
         category: settings.enableProductCategories ? category?.name ?? existingProduct.category : existingProduct.category,
         unit: body.unit,
@@ -121,6 +140,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (target.includes("sku")) {
         return badRequest("SKU already exists. Please use a unique SKU.");
       }
+    }
+    if (error instanceof Error && /Selected UOM does not exist|Inactive UOMs cannot be assigned/i.test(error.message)) {
+      return badRequest(error.message);
     }
     if (error instanceof Error && /Category is required|configured SKU prefix/i.test(error.message)) {
       return badRequest(error.message);

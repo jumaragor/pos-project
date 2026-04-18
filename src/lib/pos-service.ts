@@ -285,6 +285,7 @@ export async function getHeldTransaction(transactionId: string) {
     customerName: transaction.customer?.name ?? null,
     status: transaction.status,
     totalAmount: Number(transaction.totalAmount),
+    discountTotal: Number(transaction.discountTotal),
     createdAt: transaction.createdAt.toISOString(),
     items: transaction.items.map((item) => ({
       productId: item.productId,
@@ -405,6 +406,7 @@ export async function pushOfflineOperations(
           customerId: op.payload.customerId as string | undefined,
           cashAmount: op.payload.cashAmount as number | undefined,
           qrAmount: op.payload.qrAmount as number | undefined,
+          orderDiscount: op.payload.orderDiscount as DiscountInput | undefined,
           items: op.payload.items as SaleInput["items"]
         });
       } else if (op.type === PendingOpType.ADJUSTMENT) {

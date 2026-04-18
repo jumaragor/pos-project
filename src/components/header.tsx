@@ -10,6 +10,7 @@ import { sectionIcons } from "@/components/ui/app-icons";
 const sections: Record<string, { label: string; icon: keyof typeof sectionIcons }> = {
   dashboard: { label: "Dashboard", icon: "dashboard" },
   pos: { label: "Point of Sale", icon: "pos" },
+  sales: { label: "Sales", icon: "sales" },
   inventory: { label: "Inventory", icon: "inventory" },
   purchases: { label: "Purchases", icon: "purchases" },
   suppliers: { label: "Suppliers", icon: "suppliers" },

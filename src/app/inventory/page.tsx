@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { InventoryScreen } from "@/components/inventory-screen";
 import { getInventorySettings } from "@/lib/inventory-settings";
 import { buildPagination, DEFAULT_PAGE_SIZE } from "@/lib/pagination";
+import { buildUomLookup } from "@/lib/uom-lookup";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export default async function InventoryPage() {
         name: true,
         sku: true,
         categoryId: true,
+        uomId: true,
         category: true,
         description: true,
         compatibleUnits: true,
@@ -43,6 +45,7 @@ export default async function InventoryPage() {
     }),
     getInventorySettings()
   ]);
+  const uomLookup = await buildUomLookup(products.map((product) => product.uomId));
   return (
     <div className="grid">
       <InventoryScreen
@@ -51,6 +54,9 @@ export default async function InventoryPage() {
           name: product.name,
           sku: product.sku,
           categoryId: product.categoryId,
+          uomId: product.uomId,
+          uomCode: uomLookup.get(product.uomId ?? "")?.code ?? null,
+          uomName: uomLookup.get(product.uomId ?? "")?.name ?? null,
           category: product.category,
           description: product.description ?? "",
           compatibleUnits: product.compatibleUnits ?? "",

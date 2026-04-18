@@ -21,6 +21,7 @@ import {
 const links = [
   { href: "/dashboard", label: "Dashboard", Icon: DashboardIcon, roles: ["OWNER", "MANAGER"] },
   { href: "/pos", label: "POS", Icon: PosIcon, roles: ["OWNER", "MANAGER", "CASHIER"] },
+  { href: "/sales", label: "Sales", Icon: ReportsIcon, roles: ["OWNER", "MANAGER"] },
   { href: "/inventory", label: "Inventory", Icon: InventoryIcon, roles: ["OWNER", "MANAGER"] },
   { href: "/purchases", label: "Purchases", Icon: PurchasesIcon, roles: ["OWNER", "MANAGER"] },
   { href: "/expenses", label: "Expenses", Icon: ExpensesIcon, roles: ["OWNER", "MANAGER"] },

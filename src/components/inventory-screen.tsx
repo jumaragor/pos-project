@@ -11,8 +11,7 @@ import {
   normalizeDecimalInput,
   normalizeIntegerInput,
   sanitizeDecimalInput,
-  sanitizeIntegerInput,
-  toNumber
+  sanitizeIntegerInput
 } from "@/lib/numeric-input";
 
 type ProductRow = {
@@ -20,6 +19,9 @@ type ProductRow = {
   name: string;
   sku: string;
   categoryId?: string | null;
+  uomId?: string | null;
+  uomCode?: string | null;
+  uomName?: string | null;
   category: string;
   description: string;
   compatibleUnits: string;
@@ -52,6 +54,14 @@ type CategoryOption = {
   code: string;
   skuPrefix: string;
   status: "ACTIVE" | "INACTIVE";
+};
+type UomOption = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  productCount?: number;
 };
 type InventoryImportPreviewRow = {
   rowNumber: number;
@@ -129,6 +139,7 @@ export function InventoryScreen({
   const [metrics, setMetrics] = useState(initialMetrics);
   const [categoryOptions, setCategoryOptions] = useState(initialCategoryOptions);
   const [availableCategories, setAvailableCategories] = useState<CategoryOption[]>([]);
+  const [availableUoms, setAvailableUoms] = useState<UomOption[]>([]);
   const [productSettings, setProductSettings] = useState<ProductBehaviorSettings>(
     defaultProductBehaviorSettings
   );
@@ -163,6 +174,7 @@ export function InventoryScreen({
     name: "",
     sku: "",
     categoryId: "",
+    uomId: "",
     category: "General",
     description: "",
     compatibleUnits: "",
@@ -176,9 +188,11 @@ export function InventoryScreen({
     isActive: true,
     lowStockThreshold: 0
   });
-  const [createQtyInput, setCreateQtyInput] = useState("0");
-  const [createUnitCostInput, setCreateUnitCostInput] = useState("0.00");
-  const [createPriceInput, setCreatePriceInput] = useState("0.00");
+  const [createQtyInput, setCreateQtyInput] = useState("");
+  const [createUnitCostInput, setCreateUnitCostInput] = useState("");
+  const [createPriceInput, setCreatePriceInput] = useState("");
+  const [editUnitCostInput, setEditUnitCostInput] = useState("");
+  const [editPriceInput, setEditPriceInput] = useState("");
   const [adjustQtyInput, setAdjustQtyInput] = useState("0");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustSaving, setAdjustSaving] = useState(false);
@@ -337,9 +351,10 @@ export function InventoryScreen({
     let mounted = true;
 
     async function loadProductSettings() {
-      const [settingsResponse, categoriesResponse] = await Promise.all([
+      const [settingsResponse, categoriesResponse, uomsResponse] = await Promise.all([
         fetch("/api/settings"),
-        fetch("/api/categories?activeOnly=true&pageSize=100")
+        fetch("/api/categories?activeOnly=true&pageSize=100"),
+        fetch("/api/uoms?pageSize=200")
       ]);
       if (!settingsResponse.ok) return;
       const payload = (await settingsResponse.json()) as Partial<ProductBehaviorSettings>;
@@ -349,6 +364,11 @@ export function InventoryScreen({
         const categoriesPayload = (await categoriesResponse.json()) as { items: CategoryOption[] };
         if (!mounted) return;
         setAvailableCategories(categoriesPayload.items);
+      }
+      if (uomsResponse.ok) {
+        const uomsPayload = (await uomsResponse.json()) as { items: UomOption[] };
+        if (!mounted) return;
+        setAvailableUoms(uomsPayload.items);
       }
     }
 
@@ -545,6 +565,7 @@ export function InventoryScreen({
       name: "",
       sku: "",
       categoryId: availableCategories[0]?.id ?? "",
+      uomId: "",
       category: availableCategories[0]?.name ?? "General",
       description: "",
       compatibleUnits: "",
@@ -558,9 +579,9 @@ export function InventoryScreen({
       isActive: true,
       lowStockThreshold: productSettings.lowStockThreshold
     });
-    setCreateQtyInput("0");
-    setCreateUnitCostInput("0.00");
-    setCreatePriceInput("0.00");
+    setCreateQtyInput("");
+    setCreateUnitCostInput("");
+    setCreatePriceInput("");
     setCreatePhotoFile(null);
     setCreatePhotoPreview(null);
     setCreateOpen(true);
@@ -573,6 +594,7 @@ export function InventoryScreen({
       name: product.name,
       sku: product.sku,
       categoryId: product.categoryId ?? "",
+      uomId: product.uomId ?? "",
       category: product.category,
       description: product.description,
       compatibleUnits: product.compatibleUnits ?? "",
@@ -586,6 +608,8 @@ export function InventoryScreen({
       isActive: product.isActive,
       lowStockThreshold: product.lowStockThreshold
     });
+    setEditUnitCostInput(String(product.unitCost));
+    setEditPriceInput(String(product.sellingPrice));
     setEditPhotoFile(null);
     setEditPhotoPreview(product.photoUrl ?? null);
     setEditOpen(true);
@@ -751,14 +775,57 @@ export function InventoryScreen({
       alert("SKU is required");
       return;
     }
-    if (!Number.isFinite(form.unitCost)) {
+    if (!createUnitCostInput.trim()) {
+      alert("Unit Cost is required");
+      return;
+    }
+    if (!createQtyInput.trim()) {
+      alert("Initial Quantity is required");
+      return;
+    }
+    if (!createPriceInput.trim()) {
+      alert("Price is required");
+      return;
+    }
+
+    const unitCost = Number.parseFloat(createUnitCostInput);
+    const stockQty = Number.parseInt(createQtyInput, 10);
+    const sellingPrice = Number.parseFloat(createPriceInput);
+
+    if (!Number.isFinite(unitCost)) {
       alert("Unit Cost must be numeric");
+      return;
+    }
+    if (unitCost < 0) {
+      alert("Unit Cost cannot be negative");
+      return;
+    }
+    if (!Number.isFinite(stockQty)) {
+      alert("Initial Quantity must be numeric");
+      return;
+    }
+    if (stockQty < 0) {
+      alert("Initial Quantity cannot be negative");
+      return;
+    }
+    if (!Number.isFinite(sellingPrice)) {
+      alert("Price must be numeric");
+      return;
+    }
+    if (sellingPrice < 0) {
+      alert("Price cannot be negative");
       return;
     }
     const response = await fetch("/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form)
+      body: JSON.stringify({
+        ...form,
+        unitCost,
+        costPrice: unitCost,
+        stockQty,
+        sellingPrice
+      })
     });
     if (!response.ok) {
       const payload = await response.json();
@@ -807,12 +874,32 @@ export function InventoryScreen({
       alert("SKU is required");
       return;
     }
-    if (!Number.isFinite(form.sellingPrice)) {
+    if (!editUnitCostInput.trim()) {
+      alert("Unit Cost is required");
+      return;
+    }
+    if (!editPriceInput.trim()) {
+      alert("Price is required");
+      return;
+    }
+
+    const unitCost = Number.parseFloat(editUnitCostInput);
+    const sellingPrice = Number.parseFloat(editPriceInput);
+
+    if (!Number.isFinite(sellingPrice)) {
       alert("Price must be numeric");
       return;
     }
-    if (!Number.isFinite(form.unitCost)) {
+    if (sellingPrice < 0) {
+      alert("Price cannot be negative");
+      return;
+    }
+    if (!Number.isFinite(unitCost)) {
       alert("Unit Cost must be numeric");
+      return;
+    }
+    if (unitCost < 0) {
+      alert("Unit Cost cannot be negative");
       return;
     }
     if (!Number.isFinite(form.stockQty)) {
@@ -822,7 +909,12 @@ export function InventoryScreen({
     const response = await fetch(`/api/products/${activeProduct.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form)
+      body: JSON.stringify({
+        ...form,
+        unitCost,
+        costPrice: unitCost,
+        sellingPrice
+      })
     });
     if (!response.ok) {
       const payload = await response.json();
@@ -1471,6 +1563,22 @@ export function InventoryScreen({
                   onChange={(event) => setForm({ ...form, description: event.target.value })}
                 />
               </div>
+              <div className="form-field">
+                <label className="field-label">UOM</label>
+                <select
+                  value={form.uomId}
+                  onChange={(event) => setForm({ ...form, uomId: event.target.value })}
+                >
+                  <option value="">Select UOM</option>
+                  {availableUoms
+                    .filter((uom) => uom.isActive)
+                    .map((uom) => (
+                      <option key={uom.id} value={uom.id}>
+                        {uom.code} - {uom.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
               {productSettings.enableProductCategories ? (
                 <div className="form-field">
                   <label className="field-label">Category</label>
@@ -1502,25 +1610,16 @@ export function InventoryScreen({
                   <input
                     type="text"
                     inputMode="decimal"
-                    placeholder="0.00"
+                    placeholder="Enter unit cost"
                     value={createUnitCostInput}
                     onChange={(event) => {
                       const next = sanitizeDecimalInput(event.target.value);
                       setCreateUnitCostInput(next);
-                      setForm({
-                        ...form,
-                        unitCost: toNumber(next),
-                        costPrice: toNumber(next)
-                      });
                     }}
                     onBlur={() => {
+                      if (!createUnitCostInput.trim()) return;
                       const normalized = normalizeDecimalInput(createUnitCostInput);
                       setCreateUnitCostInput(normalized);
-                      setForm({
-                        ...form,
-                        unitCost: toNumber(normalized),
-                        costPrice: toNumber(normalized)
-                      });
                     }}
                   />
                 </div>
@@ -1529,17 +1628,16 @@ export function InventoryScreen({
                   <input
                     type="text"
                     inputMode="numeric"
-                    placeholder="0"
+                    placeholder="Enter quantity"
                     value={createQtyInput}
                     onChange={(event) => {
                       const next = sanitizeIntegerInput(event.target.value);
                       setCreateQtyInput(next);
-                      setForm({ ...form, stockQty: Number(next || "0") });
                     }}
                     onBlur={() => {
+                      if (!createQtyInput.trim()) return;
                       const normalized = normalizeIntegerInput(createQtyInput);
                       setCreateQtyInput(normalized);
-                      setForm({ ...form, stockQty: Number(normalized) });
                     }}
                   />
                 </div>
@@ -1548,23 +1646,16 @@ export function InventoryScreen({
                   <input
                     type="text"
                     inputMode="decimal"
-                    placeholder="0.00"
+                    placeholder="Enter price"
                     value={createPriceInput}
                     onChange={(event) => {
                       const next = sanitizeDecimalInput(event.target.value);
                       setCreatePriceInput(next);
-                      setForm({
-                        ...form,
-                        sellingPrice: toNumber(next)
-                      });
                     }}
                     onBlur={() => {
+                      if (!createPriceInput.trim()) return;
                       const normalized = normalizeDecimalInput(createPriceInput);
                       setCreatePriceInput(normalized);
-                      setForm({
-                        ...form,
-                        sellingPrice: toNumber(normalized)
-                      });
                     }}
                   />
                 </div>
@@ -1726,6 +1817,23 @@ export function InventoryScreen({
                         onChange={(event) => setForm({ ...form, description: event.target.value })}
                       />
                     </div>
+                    <div className="form-field">
+                      <label className="field-label">UOM</label>
+                      <select
+                        value={form.uomId}
+                        onChange={(event) => setForm({ ...form, uomId: event.target.value })}
+                      >
+                        <option value="">Select UOM</option>
+                        {availableUoms
+                          .filter((uom) => uom.isActive || uom.id === form.uomId)
+                          .map((uom) => (
+                            <option key={uom.id} value={uom.id}>
+                              {uom.code} - {uom.name}
+                              {!uom.isActive ? " (Inactive)" : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
                     {productSettings.enableCompatibleUnits ? (
                       <div className="form-field">
                         <label className="field-label">Compatible Units</label>
@@ -1749,15 +1857,13 @@ export function InventoryScreen({
                       <input
                         type="text"
                         inputMode="decimal"
-                        placeholder="0.00"
-                        value={form.unitCost}
-                        onChange={(event) =>
-                          setForm({
-                            ...form,
-                            unitCost: toNumber(sanitizeDecimalInput(event.target.value)),
-                            costPrice: toNumber(sanitizeDecimalInput(event.target.value))
-                          })
-                        }
+                        placeholder="Enter unit cost"
+                        value={editUnitCostInput}
+                        onChange={(event) => setEditUnitCostInput(sanitizeDecimalInput(event.target.value))}
+                        onBlur={() => {
+                          if (!editUnitCostInput.trim()) return;
+                          setEditUnitCostInput(normalizeDecimalInput(editUnitCostInput));
+                        }}
                       />
                     </div>
                     <div className="form-field">
@@ -1765,11 +1871,13 @@ export function InventoryScreen({
                       <input
                         type="text"
                         inputMode="decimal"
-                        placeholder="0.00"
-                        value={form.sellingPrice}
-                        onChange={(event) =>
-                          setForm({ ...form, sellingPrice: toNumber(sanitizeDecimalInput(event.target.value)) })
-                        }
+                        placeholder="Enter price"
+                        value={editPriceInput}
+                        onChange={(event) => setEditPriceInput(sanitizeDecimalInput(event.target.value))}
+                        onBlur={() => {
+                          if (!editPriceInput.trim()) return;
+                          setEditPriceInput(normalizeDecimalInput(editPriceInput));
+                        }}
                       />
                     </div>
                     <div className="form-field inventory-status-field">

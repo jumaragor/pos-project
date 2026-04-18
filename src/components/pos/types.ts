@@ -5,6 +5,8 @@ export type ProductLite = {
   name: string;
   sku: string;
   category?: string | null;
+  uomCode?: string | null;
+  uomName?: string | null;
   compatibleUnits?: string | null;
   barcode?: string | null;
   photoUrl?: string | null;

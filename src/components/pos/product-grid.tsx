@@ -50,7 +50,9 @@ export function ProductGrid({
               <span className="pos-product-price">{formatCurrency(product.sellingPrice)}</span>
               {lowStock ? <span className="pos-stock-badge">Low Stock</span> : null}
             </div>
-            <div className="pos-product-sku">{product.sku}</div>
+            {product.uomCode || product.uomName ? (
+              <div className="pos-product-sku">{product.uomCode ?? product.uomName}</div>
+            ) : null}
             {showCompatibleUnits && product.compatibleUnits ? (
               <div className="pos-product-guide">{product.compatibleUnits}</div>
             ) : null}

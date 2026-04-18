@@ -9,6 +9,7 @@ export async function GET() {
       status: true,
       totalAmount: true,
       createdAt: true,
+      user: { select: { name: true, username: true } },
       customer: { select: { name: true } }
     },
     orderBy: { createdAt: "desc" },

@@ -13,6 +13,7 @@ type ProductOption = {
   id: string;
   name: string;
   sku: string;
+  description: string;
   unit: string;
   unitCost: number;
 };
@@ -245,7 +246,7 @@ export function PurchasesScreen({
       let nextProducts = products;
       let nextSuppliers = suppliers;
       const [productsResponse, suppliersResponse] = await Promise.all([
-        fetch("/api/products?filter=active&pageSize=200"),
+        fetch("/api/products?filter=active&all=true&sortKey=name&sortDir=asc"),
         fetch("/api/suppliers?activeOnly=true&pageSize=200")
       ]);
       if (productsResponse.ok) {
@@ -650,7 +651,7 @@ export function PurchasesScreen({
     const currentValue = (productSearchByRow[rowId] ?? "").trim().toLowerCase();
     const filtered = currentValue
       ? products.filter((product) =>
-          [product.name, product.sku].join(" ").toLowerCase().includes(currentValue)
+          [product.name, product.sku, product.description ?? ""].join(" ").toLowerCase().includes(currentValue)
         )
       : products;
     return filtered.slice(0, 8);

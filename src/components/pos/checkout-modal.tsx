@@ -5,10 +5,16 @@ import { sanitizeDecimalInput, toNumber } from "@/lib/numeric-input";
 
 type CheckoutModalProps = {
   open: boolean;
+  subtotal: number;
   total: number;
+  allowDiscountEntry: boolean;
+  discountInput: string;
+  discountAmount: number;
+  discountInvalid: boolean;
   itemCount: number;
   confirming?: boolean;
   onClose: () => void;
+  onDiscountInputChange: (value: string) => void;
   onConfirm: (amountPaid: number) => void;
 };
 
@@ -16,10 +22,16 @@ const quickCashValues = [100, 200, 500, 1000];
 
 export function CheckoutModal({
   open,
+  subtotal,
   total,
+  allowDiscountEntry,
+  discountInput,
+  discountAmount,
+  discountInvalid,
   itemCount,
   confirming = false,
   onClose,
+  onDiscountInputChange,
   onConfirm
 }: CheckoutModalProps) {
   const [amountPaidInput, setAmountPaidInput] = useState("");
@@ -52,6 +64,7 @@ export function CheckoutModal({
   const amountPaid = useMemo(() => Math.max(0, toNumber(amountPaidInput)), [amountPaidInput]);
   const change = Math.max(amountPaid - total, 0);
   const insufficient = amountPaid < total;
+  const disableConfirm = insufficient || confirming || discountInvalid;
 
   if (!open) return null;
 
@@ -70,6 +83,38 @@ export function CheckoutModal({
           <div className="checkout-summary-total">{formatCurrency(total)}</div>
           <div className="checkout-summary-meta">{itemCount} item(s)</div>
         </div>
+
+        <div className="checkout-display checkout-display-summary">
+          <div>
+            <span>Subtotal</span>
+            <strong>{formatCurrency(subtotal)}</strong>
+          </div>
+          <div>
+            <span>Discount</span>
+            <strong>{formatCurrency(discountAmount)}</strong>
+          </div>
+        </div>
+
+        {allowDiscountEntry ? (
+          <div className="form-field">
+            <label className="field-label">Discount</label>
+            <div className="checkout-money-input">
+              <span className="checkout-money-prefix">₱</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={discountInput}
+                onChange={(event) => onDiscountInputChange(sanitizeDecimalInput(event.target.value))}
+              />
+            </div>
+            {discountInvalid ? (
+              <div className="checkout-warning checkout-warning-inline">
+                Discount cannot be greater than the subtotal.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="form-field">
           <label className="field-label">Amount Paid</label>
@@ -113,7 +158,7 @@ export function CheckoutModal({
           <SecondaryButton onClick={onClose} disabled={confirming}>
             Cancel
           </SecondaryButton>
-          <PrimaryButton onClick={() => onConfirm(amountPaid)} disabled={insufficient || confirming}>
+          <PrimaryButton onClick={() => onConfirm(amountPaid)} disabled={disableConfirm}>
             {confirming ? "Confirming..." : "Confirm Payment"}
           </PrimaryButton>
         </div>

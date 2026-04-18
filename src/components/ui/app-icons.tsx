@@ -214,6 +214,7 @@ export function MenuIcon(props: IconProps) {
 export const sectionIcons = {
   dashboard: DashboardIcon,
   pos: PosIcon,
+  sales: ReportsIcon,
   inventory: InventoryIcon,
   purchases: PurchasesIcon,
   expenses: ExpensesIcon,

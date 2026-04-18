@@ -7,6 +7,7 @@ import { can } from "@/lib/rbac";
 import { generateProductSku, getProductSettings } from "@/lib/product-settings";
 import { getInventorySettings } from "@/lib/inventory-settings";
 import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
+import { buildUomLookup } from "@/lib/uom-lookup";
 
 function normalizeOptionalText(value: unknown) {
   if (typeof value !== "string") return null;
@@ -14,10 +15,28 @@ function normalizeOptionalText(value: unknown) {
   return trimmed ? trimmed : null;
 }
 
+async function resolveActiveUom(uomId: unknown) {
+  const normalizedUomId = typeof uomId === "string" && uomId.trim() ? uomId.trim() : null;
+  if (!normalizedUomId) return null;
+
+  const uom = await prisma.unitOfMeasure.findUnique({
+    where: { id: normalizedUomId },
+    select: { id: true, code: true, name: true, isActive: true }
+  });
+  if (!uom) {
+    throw new Error("Selected UOM does not exist");
+  }
+  if (!uom.isActive) {
+    throw new Error("Inactive UOMs cannot be assigned to new products");
+  }
+  return uom;
+}
+
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim();
   const filter = request.nextUrl.searchParams.get("filter") ?? "active";
   const category = request.nextUrl.searchParams.get("category")?.trim();
+  const all = request.nextUrl.searchParams.get("all") === "true";
   const pageSize = parsePositiveInt(request.nextUrl.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
   const requestedPage = parsePositiveInt(request.nextUrl.searchParams.get("page"), 1, 10_000);
   const sortKey = request.nextUrl.searchParams.get("sortKey") ?? "name";
@@ -28,10 +47,11 @@ export async function GET(request: NextRequest) {
     ...activeWhere,
     ...(category && category !== "ALL" ? { category } : {}),
     ...(query
-      ? {
+        ? {
           OR: [
             { name: { contains: query, mode: "insensitive" } },
             { sku: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
             { barcode: { contains: query, mode: "insensitive" } }
           ]
         }
@@ -56,8 +76,7 @@ export async function GET(request: NextRequest) {
     prisma.product.findMany({
       where: searchableWhere,
       orderBy,
-      skip: (requestedPage - 1) * pageSize,
-      take: pageSize,
+      ...(all ? {} : { skip: (requestedPage - 1) * pageSize, take: pageSize }),
       select: {
         id: true,
         name: true,
@@ -68,6 +87,7 @@ export async function GET(request: NextRequest) {
         compatibleUnits: true,
         barcode: true,
         photoUrl: true,
+        uomId: true,
         unit: true,
         unitCost: true,
         sellingPrice: true,
@@ -88,7 +108,8 @@ export async function GET(request: NextRequest) {
       distinct: ["category"]
     })
   ]);
-  const pagination = buildPagination(requestedPage, pageSize, total);
+  const uomLookup = await buildUomLookup(products.map((product) => product.uomId));
+  const pagination = buildPagination(requestedPage, all ? total || 1 : pageSize, total);
   const metrics = {
     totalItems: statsRows.length,
     lowStockItems: inventorySettings.enableLowStockAlerts
@@ -108,6 +129,9 @@ export async function GET(request: NextRequest) {
       compatibleUnits: product.compatibleUnits ?? "",
       barcode: product.barcode ?? "",
       photoUrl: product.photoUrl ?? null,
+      uomId: product.uomId ?? null,
+      uomCode: uomLookup.get(product.uomId ?? "")?.code ?? null,
+      uomName: uomLookup.get(product.uomId ?? "")?.name ?? null,
       unitCost: Number(product.unitCost),
       sellingPrice: Number(product.sellingPrice),
       costPrice: Number(product.costPrice),
@@ -141,6 +165,7 @@ export async function POST(request: NextRequest) {
       }
     }
     const categoryId = typeof body.categoryId === "string" && body.categoryId.trim() ? body.categoryId : null;
+    const uom = await resolveActiveUom(body.uomId);
     const category = categoryId
       ? await prisma.category.findUnique({
           where: { id: categoryId },
@@ -174,6 +199,7 @@ export async function POST(request: NextRequest) {
         compatibleUnits: settings.enableCompatibleUnits ? body.compatibleUnits : null,
         barcode: normalizedBarcode,
         photoUrl: body.photoUrl,
+        uomId: uom?.id ?? null,
         categoryId: settings.enableProductCategories ? categoryId : null,
         category: settings.enableProductCategories ? category?.name ?? "General" : "General",
         unit: body.unit,
@@ -196,6 +222,9 @@ export async function POST(request: NextRequest) {
       if (target.includes("sku")) {
         return badRequest("SKU already exists. Please use a unique SKU.");
       }
+    }
+    if (error instanceof Error && /Selected UOM does not exist|Inactive UOMs cannot be assigned/i.test(error.message)) {
+      return badRequest(error.message);
     }
     if (error instanceof Error && /Category is required|configured SKU prefix/i.test(error.message)) {
       return badRequest(error.message);

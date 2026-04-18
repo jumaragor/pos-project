@@ -87,6 +87,17 @@ enum CategoryStatus {
   INACTIVE
 }
 
+model UnitOfMeasure {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
 model User {
   id                String        @id @default(cuid())
   name              String
@@ -109,6 +120,7 @@ model Product {
   name              String
   sku               String            @unique
   categoryId        String?
+  uomId             String?
   category          String
   description       String?
   compatibleUnits   String?
@@ -125,6 +137,7 @@ model Product {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   categoryRef       Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  uom               UnitOfMeasure?    @relation(fields: [uomId], references: [id], onDelete: SetNull)
   items             TransactionItem[]
   purchaseItems     PurchaseItem[]
   stockMoves        StockMovement[]

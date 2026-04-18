@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
+import { PencilIcon, TrashIcon } from "@/components/ui/app-icons";
 import { useToast } from "@/components/toast-provider";
 import {
   applyThemeToDocument,
@@ -61,6 +62,21 @@ type CategoryForm = {
   description: string;
   status: "ACTIVE" | "INACTIVE";
   sortOrder: number;
+};
+
+type UomRow = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  productCount: number;
+};
+
+type UomForm = {
+  code: string;
+  name: string;
+  isActive: boolean;
 };
 
 type LoginCarouselImageSetting = {
@@ -188,6 +204,12 @@ const emptyCategoryForm: CategoryForm = {
   sortOrder: 0
 };
 
+const emptyUomForm: UomForm = {
+  code: "",
+  name: "",
+  isActive: true
+};
+
 function toUiRole(role: Role): "ADMIN" | "CASHIER" {
   return role === Role.CASHIER ? "CASHIER" : "ADMIN";
 }
@@ -248,6 +270,129 @@ const themePresetOptions: Array<{ value: ThemePresetKey; label: string }> = [
   { value: "CUSTOM", label: "Custom" }
 ];
 
+const productSettingItems: Array<{
+  key: "enableProductCategories" | "enableCompatibleUnits" | "allowProductPhotoUpload" | "autoGenerateSKU";
+  title: string;
+  description: string;
+}> = [
+  {
+    key: "enableProductCategories",
+    title: "Enable Product Categories",
+    description: "Organize products by category."
+  },
+  {
+    key: "enableCompatibleUnits",
+    title: "Enable Compatible Units",
+    description: "Allow assigning compatible units for cashier reference."
+  },
+  {
+    key: "allowProductPhotoUpload",
+    title: "Allow Product Photo Upload",
+    description: "Enable image uploads for inventory items."
+  },
+  {
+    key: "autoGenerateSKU",
+    title: "Auto Generate SKU",
+    description: "Automatically generate SKU based on category prefix."
+  }
+];
+
+const posSettingItems: Array<{
+  key:
+    | "enableBarcodeScanner"
+    | "allowPriceOverride"
+    | "allowDiscountEntry"
+    | "autoPrintReceipt"
+    | "showCashierName"
+    | "showChangeAmount";
+  title: string;
+  description: string;
+}> = [
+  {
+    key: "enableBarcodeScanner",
+    title: "Enable Barcode Scanner",
+    description: "Allow barcode-based item entry in the POS screen."
+  },
+  {
+    key: "allowPriceOverride",
+    title: "Allow Price Override",
+    description: "Permit authorized users to change item price during sale."
+  },
+  {
+    key: "allowDiscountEntry",
+    title: "Allow Discount Entry",
+    description: "Allow discount values to be entered during checkout."
+  },
+  {
+    key: "autoPrintReceipt",
+    title: "Auto Print Receipt",
+    description: "Automatically trigger receipt printing after completed sale."
+  },
+  {
+    key: "showCashierName",
+    title: "Show Cashier Name on Receipt",
+    description: "Display cashier name on printed receipt."
+  },
+  {
+    key: "showChangeAmount",
+    title: "Show Change Amount on Receipt",
+    description: "Display customer change amount on printed receipt."
+  }
+];
+
+const inventorySettingItems: Array<{
+  key:
+    | "allowNegativeStock"
+    | "allowManualStockAdjustments"
+    | "allowProductDeletion"
+    | "enableLowStockAlerts";
+  title: string;
+  description: string;
+}> = [
+  {
+    key: "allowNegativeStock",
+    title: "Allow Negative Stock",
+    description: "Permit stock levels to go below zero during transactions or adjustments."
+  },
+  {
+    key: "allowManualStockAdjustments",
+    title: "Allow Manual Stock Adjustments",
+    description: "Allow users to manually increase or decrease inventory quantities."
+  },
+  {
+    key: "allowProductDeletion",
+    title: "Allow Product Deletion",
+    description: "Allow inventory items to be permanently deleted from the system."
+  },
+  {
+    key: "enableLowStockAlerts",
+    title: "Enable Low Stock Alerts",
+    description: "Notify users when item quantity reaches the configured threshold."
+  }
+];
+
+const taxSettingItems: Array<{
+  key: "enableTax" | "taxInclusivePricing" | "allowManualTaxEntryInPurchases";
+  title: string;
+  description: string;
+}> = [
+  {
+    key: "enableTax",
+    title: "Enable Tax",
+    description: "Apply tax computation to sales and purchases."
+  },
+  {
+    key: "taxInclusivePricing",
+    title: "Tax Inclusive Pricing",
+    description: "Treat entered item prices as already inclusive of tax."
+  },
+  {
+    key: "allowManualTaxEntryInPurchases",
+    title: "Allow Manual Tax Entry in Purchases",
+    description: "Allow users to manually enter tax values when posting purchases."
+  }
+];
+
 function centeredConfigurationForm(content: React.ReactNode) {
   return (
     <div className="configuration-form-shell">
@@ -261,8 +406,10 @@ export function ConfigurationScreen() {
   const { success } = useToast();
   const [activeTab, setActiveTab] = useState<TabKey>("users");
   const [settings, setSettings] = useState<SettingsShape>(defaultSettings);
+  const [lowStockThresholdInput, setLowStockThresholdInput] = useState(String(defaultSettings.lowStockThreshold));
   const [users, setUsers] = useState<UserRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [uoms, setUoms] = useState<UomRow[]>([]);
   const [userOpen, setUserOpen] = useState(false);
   const [userMode, setUserMode] = useState<"create" | "edit">("create");
   const [activeUser, setActiveUser] = useState<UserRow | null>(null);
@@ -271,6 +418,10 @@ export function ConfigurationScreen() {
   const [categoryMode, setCategoryMode] = useState<"create" | "edit">("create");
   const [activeCategory, setActiveCategory] = useState<CategoryRow | null>(null);
   const [categoryForm, setCategoryForm] = useState<CategoryForm>(emptyCategoryForm);
+  const [uomOpen, setUomOpen] = useState(false);
+  const [uomMode, setUomMode] = useState<"create" | "edit">("create");
+  const [activeUom, setActiveUom] = useState<UomRow | null>(null);
+  const [uomForm, setUomForm] = useState<UomForm>(emptyUomForm);
 
   const isAdmin = ["OWNER", "MANAGER"].includes(data?.user?.role ?? "");
 
@@ -278,6 +429,9 @@ export function ConfigurationScreen() {
     const response = await fetch("/api/settings");
     const payload = (await response.json()) as SettingsShape;
     setSettings((prev) => ({ ...prev, ...payload }));
+    setLowStockThresholdInput(
+      Number.isFinite(Number(payload.lowStockThreshold)) ? String(payload.lowStockThreshold) : ""
+    );
   }
 
   async function loadUsers() {
@@ -294,10 +448,18 @@ export function ConfigurationScreen() {
     setCategories(payload.items);
   }
 
+  async function loadUoms() {
+    const response = await fetch("/api/uoms?pageSize=200");
+    if (!response.ok) return;
+    const payload = (await response.json()) as { items: UomRow[] };
+    setUoms(payload.items);
+  }
+
   useEffect(() => {
     void loadSettings();
     void loadUsers();
     void loadCategories();
+    void loadUoms();
   }, []);
 
   function openCreateUser() {
@@ -314,6 +476,13 @@ export function ConfigurationScreen() {
     setCategoryOpen(true);
   }
 
+  function openCreateUom() {
+    setUomMode("create");
+    setActiveUom(null);
+    setUomForm(emptyUomForm);
+    setUomOpen(true);
+  }
+
   function openEditCategory(category: CategoryRow) {
     setCategoryMode("edit");
     setActiveCategory(category);
@@ -326,6 +495,17 @@ export function ConfigurationScreen() {
       sortOrder: category.sortOrder
     });
     setCategoryOpen(true);
+  }
+
+  function openEditUom(uom: UomRow) {
+    setUomMode("edit");
+    setActiveUom(uom);
+    setUomForm({
+      code: uom.code,
+      name: uom.name,
+      isActive: uom.isActive
+    });
+    setUomOpen(true);
   }
 
   function openEditUser(user: UserRow) {
@@ -426,6 +606,35 @@ export function ConfigurationScreen() {
     success(categoryMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
   }
 
+  async function saveUom() {
+    if (!uomForm.code.trim() || !uomForm.name.trim()) {
+      alert("UOM code and name are required.");
+      return;
+    }
+
+    const endpoint = uomMode === "edit" && activeUom ? `/api/uoms/${activeUom.id}` : "/api/uoms";
+    const method = uomMode === "edit" ? "PUT" : "POST";
+    const response = await fetch(endpoint, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: uomForm.code.trim().toUpperCase(),
+        name: uomForm.name.trim(),
+        isActive: uomForm.isActive,
+        sortOrder: activeUom?.sortOrder ?? 0
+      })
+    });
+    if (!response.ok) {
+      const payload = await response.json();
+      alert(payload.error ?? "Failed to save UOM.");
+      return;
+    }
+
+    setUomOpen(false);
+    await loadUoms();
+    success(uomMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
+  }
+
   async function toggleCategoryStatus(category: CategoryRow) {
     const response = await fetch(`/api/categories/${category.id}`, {
       method: "PUT",
@@ -457,6 +666,18 @@ export function ConfigurationScreen() {
       return;
     }
     await loadCategories();
+    success("Deleted successfully");
+  }
+
+  async function deleteUom(uom: UomRow) {
+    if (!window.confirm(`Delete UOM ${uom.code}?`)) return;
+    const response = await fetch(`/api/uoms/${uom.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const payload = await response.json();
+      alert(payload.error ?? "Failed to delete UOM.");
+      return;
+    }
+    await loadUoms();
     success("Deleted successfully");
   }
 
@@ -495,8 +716,56 @@ export function ConfigurationScreen() {
     }
     const json = (await response.json()) as SettingsShape;
     setSettings((prev) => ({ ...prev, ...json }));
+    setLowStockThresholdInput(
+      Number.isFinite(Number(json.lowStockThreshold)) ? String(json.lowStockThreshold) : ""
+    );
     window.dispatchEvent(new Event("microbiz:settings-updated"));
     success(successMessage);
+  }
+
+  function updateLowStockThresholdInput(value: string) {
+    if (!/^\d*$/.test(value)) return;
+    setLowStockThresholdInput(value);
+  }
+
+  async function saveInventorySettings() {
+    const parsedLowStockThreshold =
+      lowStockThresholdInput.trim() === "" ? 0 : Number(lowStockThresholdInput);
+    if (!Number.isFinite(parsedLowStockThreshold)) {
+      alert("Low Stock Threshold must be a numeric value.");
+      return;
+    }
+
+    const nextSettings = {
+      ...settings,
+      lowStockThreshold: parsedLowStockThreshold
+    };
+    setSettings(nextSettings);
+
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        allowNegativeStock: nextSettings.allowNegativeStock,
+        lowStockThreshold: nextSettings.lowStockThreshold,
+        allowManualStockAdjustments: nextSettings.allowManualStockAdjustments,
+        allowProductDeletion: nextSettings.allowProductDeletion,
+        enableLowStockAlerts: nextSettings.enableLowStockAlerts,
+        inventoryValuationMethod: nextSettings.inventoryValuationMethod
+      })
+    });
+    if (!response.ok) {
+      alert("Failed to save configuration.");
+      return;
+    }
+
+    const json = (await response.json()) as SettingsShape;
+    setSettings((prev) => ({ ...prev, ...json }));
+    setLowStockThresholdInput(
+      Number.isFinite(Number(json.lowStockThreshold)) ? String(json.lowStockThreshold) : ""
+    );
+    window.dispatchEvent(new Event("microbiz:settings-updated"));
+    success("Changes saved successfully");
   }
 
   function validateThemeValues() {
@@ -692,90 +961,274 @@ export function ConfigurationScreen() {
           </div>
         );
       case "inventory":
-        return centeredConfigurationForm(
+        return (
           <>
-            <h2 className="section-title">Inventory Controls</h2>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowNegativeStock} onChange={(e) => setSettings((p) => ({ ...p, allowNegativeStock: e.target.checked }))} />Allow Negative Stock</label>
-            <label className="form-field"><span className="field-label">Low Stock Threshold</span><input type="number" value={settings.lowStockThreshold} onChange={(e) => setSettings((p) => ({ ...p, lowStockThreshold: Number(e.target.value) }))} /></label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowManualStockAdjustments} onChange={(e) => setSettings((p) => ({ ...p, allowManualStockAdjustments: e.target.checked }))} />Allow Manual Stock Adjustments</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowProductDeletion} onChange={(e) => setSettings((p) => ({ ...p, allowProductDeletion: e.target.checked }))} />Allow Product Deletion</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.enableLowStockAlerts} onChange={(e) => setSettings((p) => ({ ...p, enableLowStockAlerts: e.target.checked }))} />Enable Low Stock Alerts</label>
-            <label className="form-field">
-              <span className="field-label">Inventory Valuation Method</span>
-              <select
-                value={settings.inventoryValuationMethod}
-                onChange={(e) =>
-                  setSettings((p) => ({
-                    ...p,
-                    inventoryValuationMethod: e.target.value as SettingsShape["inventoryValuationMethod"]
-                  }))
-                }
-              >
-                <option value="STANDARD">STANDARD</option>
-                <option value="FIFO">FIFO</option>
-              </select>
-            </label>
-            <div className="configuration-actions">
-              <PrimaryButton
-                className="configuration-save-btn"
-                onClick={() =>
-                  saveSettings([
-                    "allowNegativeStock",
-                    "lowStockThreshold",
-                    "allowManualStockAdjustments",
-                    "allowProductDeletion",
-                    "enableLowStockAlerts",
-                    "inventoryValuationMethod"
-                  ])
-                }
-              >
-                Save Changes
-              </PrimaryButton>
+            {centeredConfigurationForm(
+              <div className="configuration-product-shell">
+                <div className="configuration-product-head">
+                  <div>
+                    <h2 className="section-title">Inventory Controls</h2>
+                    <div className="field-help">
+                      Configure stock handling rules, alert behavior, and inventory valuation preferences.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="configuration-product-list">
+                  {inventorySettingItems.map((item) => (
+                    <label key={item.key} className="configuration-setting-row">
+                      <div className="configuration-setting-control">
+                        <input
+                          type="checkbox"
+                          checked={settings[item.key]}
+                          onChange={(e) =>
+                            setSettings((p) => ({
+                              ...p,
+                              [item.key]: e.target.checked
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="configuration-setting-copy">
+                        <span className="configuration-setting-title">{item.title}</span>
+                        <span className="configuration-setting-description">{item.description}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="configuration-subsection configuration-inventory-subsection">
+                  <div className="configuration-subsection-head">
+                    <h3 className="section-title configuration-subtitle">Inventory Valuation & Alerts</h3>
+                    <div className="field-help">
+                      Set the valuation method and the low stock level used for inventory monitoring.
+                    </div>
+                  </div>
+                  <div className="configuration-inline-grid">
+                    <label className="form-field configuration-select-field">
+                      <span className="field-label">Inventory Valuation Method</span>
+                      <select
+                        value={settings.inventoryValuationMethod}
+                        onChange={(e) =>
+                          setSettings((p) => ({
+                            ...p,
+                            inventoryValuationMethod: e.target.value as SettingsShape["inventoryValuationMethod"]
+                          }))
+                        }
+                      >
+                        <option value="STANDARD">Standard</option>
+                        <option value="FIFO">FIFO</option>
+                      </select>
+                    </label>
+                    <label className="form-field configuration-threshold-field">
+                      <span className="field-label">Low Stock Alert Threshold</span>
+                      <div className="configuration-threshold-row">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          placeholder="0"
+                          value={lowStockThresholdInput}
+                          onChange={(e) => updateLowStockThresholdInput(e.target.value)}
+                        />
+                        <span className="configuration-threshold-unit">items</span>
+                      </div>
+                      <span className="field-help">
+                        Trigger low stock alerts when available quantity reaches this level.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="configuration-form-shell configuration-product-page-actions-shell">
+              <div className="configuration-form-card">
+                <div className="configuration-actions configuration-product-page-actions">
+                  <PrimaryButton className="configuration-save-btn" onClick={() => void saveInventorySettings()}>
+                    Save Changes
+                  </PrimaryButton>
+                </div>
+              </div>
             </div>
           </>
         );
       case "tax":
-        return centeredConfigurationForm(
+        return (
           <>
-            <h2 className="section-title">Tax Settings</h2>
-            <label className="configuration-check"><input type="checkbox" checked={settings.enableTax} onChange={(e) => setSettings((p) => ({ ...p, enableTax: e.target.checked }))} />Enable Tax</label>
-            <label className="form-field"><span className="field-label">Default Tax Rate (%)</span><input type="number" value={settings.defaultTaxRate} onChange={(e) => setSettings((p) => ({ ...p, defaultTaxRate: Number(e.target.value) }))} /></label>
-            <label className="form-field"><span className="field-label">Tax Label</span><input value={settings.taxLabel} onChange={(e) => setSettings((p) => ({ ...p, taxLabel: e.target.value }))} /></label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.taxInclusivePricing} onChange={(e) => setSettings((p) => ({ ...p, taxInclusivePricing: e.target.checked }))} />Tax Inclusive Pricing</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowManualTaxEntryInPurchases} onChange={(e) => setSettings((p) => ({ ...p, allowManualTaxEntryInPurchases: e.target.checked }))} />Allow Manual Tax Entry in Purchases</label>
-            <div className="configuration-actions">
-              <PrimaryButton
-                className="configuration-save-btn"
-                onClick={() =>
-                  saveSettings([
-                    "enableTax",
-                    "defaultTaxRate",
-                    "taxLabel",
-                    "taxInclusivePricing",
-                    "allowManualTaxEntryInPurchases"
-                  ])
-                }
-              >
-                Save Changes
-              </PrimaryButton>
+            {centeredConfigurationForm(
+              <div className="configuration-product-shell">
+                <div className="configuration-product-head">
+                  <div>
+                    <h2 className="section-title">Tax Settings</h2>
+                    <div className="field-help">
+                      Configure how taxes are calculated, labeled, and applied across sales and purchases.
+                    </div>
+                  </div>
+                </div>
+                <div className="configuration-product-list">
+                  {taxSettingItems.map((item) => (
+                    <label key={item.key} className="configuration-setting-row">
+                      <div className="configuration-setting-control">
+                        <input
+                          type="checkbox"
+                          checked={settings[item.key]}
+                          onChange={(e) =>
+                            setSettings((p) => ({
+                              ...p,
+                              [item.key]: e.target.checked
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="configuration-setting-copy">
+                        <span className="configuration-setting-title">{item.title}</span>
+                        <span className="configuration-setting-description">{item.description}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="configuration-subsection configuration-tax-subsection">
+                  <div className="configuration-subsection-head">
+                    <h3 className="section-title configuration-subtitle">Tax Defaults</h3>
+                    <div className="field-help">
+                      Set the standard rate and label used when tax is enabled in the system.
+                    </div>
+                  </div>
+                  <div className="configuration-inline-grid configuration-tax-grid">
+                    <label className="form-field configuration-tax-rate-field">
+                      <span className="field-label">Default Tax Rate (%)</span>
+                      <input
+                        type="number"
+                        value={settings.defaultTaxRate}
+                        onChange={(e) =>
+                          setSettings((p) => ({ ...p, defaultTaxRate: Number(e.target.value) }))
+                        }
+                      />
+                      <span className="field-help">
+                        Standard tax rate applied when tax is enabled.
+                      </span>
+                    </label>
+                    <label className="form-field configuration-tax-label-field">
+                      <span className="field-label">Tax Label</span>
+                      <input
+                        value={settings.taxLabel}
+                        onChange={(e) => setSettings((p) => ({ ...p, taxLabel: e.target.value }))}
+                      />
+                      <span className="field-help">
+                        Short label shown in receipts and sales summaries.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="configuration-form-shell configuration-product-page-actions-shell">
+              <div className="configuration-form-card">
+                <div className="configuration-actions configuration-product-page-actions">
+                  <PrimaryButton
+                    className="configuration-save-btn"
+                    onClick={() =>
+                      saveSettings([
+                        "enableTax",
+                        "defaultTaxRate",
+                        "taxLabel",
+                        "taxInclusivePricing",
+                        "allowManualTaxEntryInPurchases"
+                      ])
+                    }
+                  >
+                    Save Changes
+                  </PrimaryButton>
+                </div>
+              </div>
             </div>
           </>
         );
       case "pos":
-        return centeredConfigurationForm(
+        return (
           <>
-            <h2 className="section-title">POS Settings</h2>
-            <label className="configuration-check"><input type="checkbox" checked={settings.enableBarcodeScanner} onChange={(e) => setSettings((p) => ({ ...p, enableBarcodeScanner: e.target.checked }))} />Enable Barcode Scanner</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowPriceOverride} onChange={(e) => setSettings((p) => ({ ...p, allowPriceOverride: e.target.checked }))} />Allow Price Override</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowDiscountEntry} onChange={(e) => setSettings((p) => ({ ...p, allowDiscountEntry: e.target.checked }))} />Allow Discount Entry</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.autoPrintReceipt} onChange={(e) => setSettings((p) => ({ ...p, autoPrintReceipt: e.target.checked }))} />Auto Print Receipt</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.showCashierName} onChange={(e) => setSettings((p) => ({ ...p, showCashierName: e.target.checked }))} />Show Cashier Name on Receipt</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.showChangeAmount} onChange={(e) => setSettings((p) => ({ ...p, showChangeAmount: e.target.checked }))} />Show Change Amount on Receipt</label>
-            <label className="form-field"><span className="field-label">Default Payment Method</span><select value={settings.defaultPaymentMethod} onChange={(e) => setSettings((p) => ({ ...p, defaultPaymentMethod: e.target.value as SettingsShape["defaultPaymentMethod"] }))}><option value="CASH">Cash</option><option value="GCASH">GCash</option><option value="CARD">Card</option></select></label>
-            <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableBarcodeScanner", "allowPriceOverride", "allowDiscountEntry", "autoPrintReceipt", "showCashierName", "showChangeAmount", "defaultPaymentMethod"])}>
-                Save Changes
-              </PrimaryButton>
+            {centeredConfigurationForm(
+              <div className="configuration-product-shell">
+                <div className="configuration-product-head">
+                  <div>
+                    <h2 className="section-title">POS Settings</h2>
+                    <div className="field-help">
+                      Configure cashier workflow behavior, receipt display options, and checkout defaults.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="configuration-product-list">
+                  {posSettingItems.map((item) => (
+                    <label key={item.key} className="configuration-setting-row">
+                      <div className="configuration-setting-control">
+                        <input
+                          type="checkbox"
+                          checked={settings[item.key]}
+                          onChange={(e) =>
+                            setSettings((p) => ({
+                              ...p,
+                              [item.key]: e.target.checked
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="configuration-setting-copy">
+                        <span className="configuration-setting-title">{item.title}</span>
+                        <span className="configuration-setting-description">{item.description}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="configuration-pos-payment-block">
+                  <div className="configuration-uom-copy">
+                    <h3 className="section-title configuration-subtitle">Checkout Defaults</h3>
+                    <div className="field-help">
+                      Set the default payment option that appears first when starting a new sale.
+                    </div>
+                  </div>
+                  <label className="form-field configuration-pos-payment-field">
+                    <span className="field-label">Default Payment Method</span>
+                    <select
+                      value={settings.defaultPaymentMethod}
+                      onChange={(e) =>
+                        setSettings((p) => ({
+                          ...p,
+                          defaultPaymentMethod: e.target.value as SettingsShape["defaultPaymentMethod"]
+                        }))
+                      }
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="GCASH">GCash</option>
+                      <option value="CARD">Card</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+            <div className="configuration-form-shell configuration-product-page-actions-shell">
+              <div className="configuration-form-card">
+                <div className="configuration-actions configuration-product-page-actions">
+                  <PrimaryButton
+                    className="configuration-save-btn"
+                    onClick={() =>
+                      saveSettings([
+                        "enableBarcodeScanner",
+                        "allowPriceOverride",
+                        "allowDiscountEntry",
+                        "autoPrintReceipt",
+                        "showCashierName",
+                        "showChangeAmount",
+                        "defaultPaymentMethod"
+                      ])
+                    }
+                  >
+                    Save Changes
+                  </PrimaryButton>
+                </div>
+              </div>
             </div>
           </>
         );
@@ -800,18 +1253,148 @@ export function ConfigurationScreen() {
           </>
         );
       case "product":
-        return centeredConfigurationForm(
+        return (
           <>
-            <h2 className="section-title">Product Settings</h2>
-            <label className="configuration-check"><input type="checkbox" checked={settings.enableProductCategories} onChange={(e) => setSettings((p) => ({ ...p, enableProductCategories: e.target.checked }))} />Enable Product Categories</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.enableCompatibleUnits} onChange={(e) => setSettings((p) => ({ ...p, enableCompatibleUnits: e.target.checked }))} />Enable Compatible Units</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.allowProductPhotoUpload} onChange={(e) => setSettings((p) => ({ ...p, allowProductPhotoUpload: e.target.checked }))} />Allow Product Photo Upload</label>
-            <label className="configuration-check"><input type="checkbox" checked={settings.autoGenerateSKU} onChange={(e) => setSettings((p) => ({ ...p, autoGenerateSKU: e.target.checked }))} />Auto Generate SKU</label>
-            <div className="field-help">
-              When enabled, SKU is generated automatically from the selected category prefix. When disabled, SKU is entered manually.
-            </div>
-            <div className="configuration-actions">
-              <PrimaryButton className="configuration-save-btn" onClick={() => saveSettings(["enableProductCategories", "enableCompatibleUnits", "allowProductPhotoUpload", "autoGenerateSKU"], "Product settings updated successfully")}>Save Changes</PrimaryButton>
+            {centeredConfigurationForm(
+              <div className="configuration-product-shell">
+                <div className="configuration-product-head">
+                  <div>
+                    <h2 className="section-title">General Product Settings</h2>
+                    <div className="field-help">
+                      Configure core product behavior used across inventory creation, cashier workflows, and SKU setup.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="configuration-product-list">
+                  {productSettingItems.map((item) => (
+                    <label key={item.key} className="configuration-setting-row">
+                      <div className="configuration-setting-control">
+                        <input
+                          type="checkbox"
+                          checked={settings[item.key]}
+                          onChange={(e) =>
+                            setSettings((p) => ({
+                              ...p,
+                              [item.key]: e.target.checked
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="configuration-setting-copy">
+                        <span className="configuration-setting-title">{item.title}</span>
+                        <span className="configuration-setting-description">{item.description}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+              </div>
+            )}
+            {centeredConfigurationForm(
+              <div className="configuration-uom-card">
+                <div className="inventory-table-head configuration-uom-head">
+                  <div className="configuration-uom-copy">
+                    <h2 className="section-title">Units of Measure (UOM Management)</h2>
+                    <div className="field-help">
+                      Standardize how products are labeled across Inventory and displayed on POS item cards.
+                    </div>
+                  </div>
+                  <PrimaryButton className="configuration-inline-btn" onClick={openCreateUom}>
+                    + Add UOM
+                  </PrimaryButton>
+                </div>
+                <div className="table-wrap configuration-uom-table">
+                  <table>
+                    <colgroup>
+                      <col className="configuration-uom-col-code" />
+                      <col className="configuration-uom-col-name" />
+                      <col className="configuration-uom-col-status" />
+                      <col className="configuration-uom-col-actions" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {uoms.map((uom) => (
+                        <tr key={uom.id}>
+                          <td>{uom.code}</td>
+                          <td>{uom.name}</td>
+                          <td>
+                            <span className={uom.isActive ? "badge purchases-status-posted" : "badge purchases-status-draft"}>
+                              {uom.isActive ? "ACTIVE" : "INACTIVE"}
+                            </span>
+                          </td>
+                          <td className="actions-cell configuration-uom-actions-cell">
+                            <div className="inventory-actions configuration-uom-actions">
+                              <button
+                                type="button"
+                                className="icon-action-btn"
+                                aria-label={`Edit ${uom.code}`}
+                                onClick={() => {
+                                  openEditUom(uom);
+                                }}
+                              >
+                                <PencilIcon className="icon-action-svg" />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-action-btn configuration-uom-delete-btn"
+                                aria-label={`Delete ${uom.code}`}
+                                disabled={uom.productCount > 0}
+                                onClick={() => {
+                                  void deleteUom(uom);
+                                }}
+                              >
+                                <TrashIcon className="icon-action-svg" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {!uoms.length ? (
+                        <tr>
+                          <td colSpan={4}>
+                            <div className="configuration-uom-empty">
+                              <strong>No units of measure yet.</strong>
+                              <span>
+                                Start by adding units like PCS, BOX, L, or SET to standardize inventory and POS display.
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="configuration-form-shell configuration-product-page-actions-shell">
+              <div className="configuration-form-card">
+                <div className="configuration-actions configuration-product-page-actions">
+                  <PrimaryButton
+                    className="configuration-save-btn"
+                    onClick={() =>
+                      saveSettings(
+                        [
+                          "enableProductCategories",
+                          "enableCompatibleUnits",
+                          "allowProductPhotoUpload",
+                          "autoGenerateSKU"
+                        ],
+                        "Product settings updated successfully"
+                      )
+                    }
+                  >
+                    Save Changes
+                  </PrimaryButton>
+                </div>
+              </div>
             </div>
           </>
         );
@@ -1216,6 +1799,48 @@ export function ConfigurationScreen() {
             <div className="row" style={{ marginTop: 12 }}>
               <SecondaryButton onClick={() => setCategoryOpen(false)}>Cancel</SecondaryButton>
               <PrimaryButton onClick={saveCategory}>Save Category</PrimaryButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {uomOpen ? (
+        <div className="inventory-modal-overlay">
+          <div className="inventory-modal">
+            <h3 className="section-title">{uomMode === "create" ? "Add UOM" : "Edit UOM"}</h3>
+            <div className="stack">
+              <div className="grid grid-2">
+          <label className="form-field">
+            <span className="field-label">Code</span>
+            <input
+              value={uomForm.code}
+              onChange={(e) => setUomForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))}
+            />
+          </label>
+          <label className="form-field">
+            <span className="field-label">Name</span>
+            <input
+              value={uomForm.name}
+              onChange={(e) => setUomForm((p) => ({ ...p, name: e.target.value }))}
+            />
+          </label>
+              </div>
+        <div className="form-field">
+          <span className="field-label">Status</span>
+  <label className="configuration-check configuration-check-reverse">
+    <span>Active</span>
+    <input
+      className="configuration-check-lg"
+      type="checkbox"
+      checked={uomForm.isActive}
+      onChange={(e) => setUomForm((p) => ({ ...p, isActive: e.target.checked }))}
+    />
+  </label>
+        </div>
+            </div>
+            <div className="row" style={{ marginTop: 12 }}>
+              <SecondaryButton onClick={() => setUomOpen(false)}>Cancel</SecondaryButton>
+              <PrimaryButton onClick={saveUom}>Save UOM</PrimaryButton>
             </div>
           </div>
         </div>
