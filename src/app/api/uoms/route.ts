@@ -5,12 +5,6 @@ import { badRequest, created, forbidden, ok, serverError, unauthorized } from "@
 import { buildPagination, DEFAULT_PAGE_SIZE, parsePositiveInt } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
-function asOptionalText(value: unknown) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : null;
-}
-
 function normalizeCode(value: unknown) {
   if (typeof value !== "string") return "";
   return value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
