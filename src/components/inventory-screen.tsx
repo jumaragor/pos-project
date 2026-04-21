@@ -108,6 +108,28 @@ type ProductBehaviorSettings = {
   enableLowStockAlerts: boolean;
 };
 
+function sanitizeSignedAdjustmentInput(value: string) {
+  const trimmed = value.replace(/\s+/g, "");
+  const hasLeadingMinus = trimmed.startsWith("-");
+  const unsigned = trimmed.replace(/-/g, "");
+  const cleaned = unsigned.replace(/[^\d.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  const normalized =
+    firstDot === -1
+      ? cleaned
+      : `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, "")}`;
+  return hasLeadingMinus ? `-${normalized}` : normalized;
+}
+
+function parseAdjustmentQuantity(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-" || trimmed === "." || trimmed === "-.") {
+    return null;
+  }
+  const parsed = Number.parseFloat(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const defaultProductBehaviorSettings: ProductBehaviorSettings = {
   enableProductCategories: true,
   enableCompatibleUnits: true,
@@ -212,6 +234,8 @@ export function InventoryScreen({
   const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const inventoryRefsLoadedRef = useRef(false);
+  const inventoryRefsRequestRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     const anyModalOpen =
@@ -351,38 +375,52 @@ export function InventoryScreen({
     let mounted = true;
 
     async function loadProductSettings() {
-      const [settingsResponse, categoriesResponse, uomsResponse] = await Promise.all([
-        fetch("/api/settings"),
-        fetch("/api/categories?activeOnly=true&pageSize=100"),
-        fetch("/api/uoms?pageSize=200")
-      ]);
+      const settingsResponse = await fetch("/api/settings");
       if (!settingsResponse.ok) return;
       const payload = (await settingsResponse.json()) as Partial<ProductBehaviorSettings>;
       if (!mounted) return;
       setProductSettings((prev) => ({ ...prev, ...payload }));
-      if (categoriesResponse.ok) {
-        const categoriesPayload = (await categoriesResponse.json()) as { items: CategoryOption[] };
-        if (!mounted) return;
-        setAvailableCategories(categoriesPayload.items);
-      }
-      if (uomsResponse.ok) {
-        const uomsPayload = (await uomsResponse.json()) as { items: UomOption[] };
-        if (!mounted) return;
-        setAvailableUoms(uomsPayload.items);
-      }
     }
 
-    void loadProductSettings();
     const handleSettingsUpdated = () => {
       void loadProductSettings();
+      if (inventoryRefsLoadedRef.current) {
+        void ensureInventoryReferenceData(true);
+      }
       void refresh(1, query);
     };
+    void loadProductSettings();
     window.addEventListener("microbiz:settings-updated", handleSettingsUpdated);
     return () => {
       mounted = false;
       window.removeEventListener("microbiz:settings-updated", handleSettingsUpdated);
     };
   }, [query, refresh]);
+
+  async function ensureInventoryReferenceData(force = false) {
+    if (!force && inventoryRefsLoadedRef.current) return;
+    if (!force && inventoryRefsRequestRef.current) return inventoryRefsRequestRef.current;
+
+    inventoryRefsRequestRef.current = (async () => {
+      const [categoriesResponse, uomsResponse] = await Promise.all([
+        fetch("/api/categories?activeOnly=true&pageSize=100"),
+        fetch("/api/uoms?pageSize=200")
+      ]);
+      if (categoriesResponse.ok) {
+        const categoriesPayload = (await categoriesResponse.json()) as { items: CategoryOption[] };
+        setAvailableCategories(categoriesPayload.items);
+      }
+      if (uomsResponse.ok) {
+        const uomsPayload = (await uomsResponse.json()) as { items: UomOption[] };
+        setAvailableUoms(uomsPayload.items);
+      }
+      inventoryRefsLoadedRef.current = true;
+    })().finally(() => {
+      inventoryRefsRequestRef.current = null;
+    });
+
+    return inventoryRefsRequestRef.current;
+  }
 
   function getStockStatus(item: ProductRow) {
     if (item.stockQty <= 0) {
@@ -399,7 +437,7 @@ export function InventoryScreen({
 
   function openAdjust(product: ProductRow) {
     setActiveProduct(product);
-    setAdjustQtyInput("0");
+    setAdjustQtyInput("");
     setAdjustReason("");
     setAdjustOpen(true);
   }
@@ -559,7 +597,8 @@ export function InventoryScreen({
     );
   }
 
-  function openCreate() {
+  async function openCreate() {
+    await ensureInventoryReferenceData();
     setSkuPreviewError("");
     setForm({
       name: "",
@@ -587,7 +626,8 @@ export function InventoryScreen({
     setCreateOpen(true);
   }
 
-  function openEdit(product: ProductRow) {
+  async function openEdit(product: ProductRow) {
+    await ensureInventoryReferenceData();
     setSkuPreviewError("");
     setActiveProduct(product);
     setForm({
@@ -986,8 +1026,8 @@ export function InventoryScreen({
 
   async function saveAdjustment() {
     if (!activeProduct) return;
-    const qtyDelta = Number(adjustQtyInput);
-    if (!Number.isFinite(qtyDelta) || qtyDelta === 0) {
+    const qtyDelta = parseAdjustmentQuantity(adjustQtyInput);
+    if (qtyDelta === null || qtyDelta === 0) {
       alert("Enter a non-zero stock adjustment.");
       return;
     }
@@ -1020,6 +1060,12 @@ export function InventoryScreen({
       setAdjustSaving(false);
     }
   }
+
+  const adjustmentPreviewQty = parseAdjustmentQuantity(adjustQtyInput);
+  const projectedStock =
+    activeProduct && adjustmentPreviewQty !== null
+      ? Number((activeProduct.stockQty + adjustmentPreviewQty).toFixed(2))
+      : null;
 
   return (
     <div className="inventory-admin">
@@ -1968,9 +2014,17 @@ export function InventoryScreen({
                   inputMode="decimal"
                   placeholder="Use negative for stock-out, positive for stock-in"
                   value={adjustQtyInput}
-                  onChange={(event) => setAdjustQtyInput(sanitizeDecimalInput(event.target.value))}
+                  onChange={(event) => setAdjustQtyInput(sanitizeSignedAdjustmentInput(event.target.value))}
                 />
               </label>
+              <div className="field-help">
+                Positive values add stock. Negative values deduct stock.
+              </div>
+              {projectedStock !== null ? (
+                <div className="field-help">
+                  New stock: <strong>{formatNumber(projectedStock)}</strong>
+                </div>
+              ) : null}
               <label className="form-field">
                 <span className="field-label">Reason</span>
                 <textarea

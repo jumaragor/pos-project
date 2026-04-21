@@ -192,6 +192,26 @@ export function MoreVerticalIcon(props: IconProps) {
   );
 }
 
+export function EyeIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+      <circle cx="12" cy="12" r="3" />
+    </BaseIcon>
+  );
+}
+
+export function EyeOffIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 6.4A10.7 10.7 0 0 1 12 6c6.5 0 10 6 10 6a18.7 18.7 0 0 1-3.2 3.8" />
+      <path d="M6.7 6.7C4 8.5 2 12 2 12s3.5 6 10 6c1.7 0 3.2-.4 4.5-1" />
+      <path d="M9.9 9.9A3 3 0 0 0 14.1 14.1" />
+    </BaseIcon>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <BaseIcon {...props}>

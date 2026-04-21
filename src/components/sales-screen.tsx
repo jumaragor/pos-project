@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { SalesDetail, SalesListRow } from "@/lib/sales";
@@ -16,6 +16,7 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedSale, setSelectedSale] = useState<SalesDetail | null>(null);
+  const saleDetailCacheRef = useRef<Map<string, SalesDetail>>(new Map());
 
   const summary = useMemo(
     () => ({
@@ -45,6 +46,11 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
   }
 
   async function openDetails(id: string) {
+    const cachedSale = saleDetailCacheRef.current.get(id);
+    if (cachedSale) {
+      setSelectedSale(cachedSale);
+      return;
+    }
     setDetailLoading(true);
     try {
       const response = await fetch(`/api/sales/${id}`);
@@ -53,6 +59,7 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
         alert(payload.error ?? "Failed to load sale details.");
         return;
       }
+      saleDetailCacheRef.current.set(id, payload);
       setSelectedSale(payload);
     } finally {
       setDetailLoading(false);

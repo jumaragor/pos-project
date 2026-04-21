@@ -146,7 +146,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const items = parseItems(body.items);
     const supplierId = typeof body.supplierId === "string" && body.supplierId.trim() ? body.supplierId : null;
     const supplierName = asOptionalText(body.supplierName);
-    const referenceNumber = asOptionalText(body.referenceNumber);
     const notes = asOptionalText(body.notes);
     let resolvedSupplierName = supplierName;
 
@@ -182,6 +181,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }));
     const totalItems = normalizedItems.length;
     const totalCost = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const referenceNumber = existing.purchaseNumber;
 
     const updated = await prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.update({

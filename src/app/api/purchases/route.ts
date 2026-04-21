@@ -160,7 +160,6 @@ export async function POST(request: NextRequest) {
     const items = parseItems(body.items);
     const supplierId = typeof body.supplierId === "string" && body.supplierId.trim() ? body.supplierId : null;
     const supplierName = asOptionalText(body.supplierName);
-    const referenceNumber = asOptionalText(body.referenceNumber);
     const notes = asOptionalText(body.notes);
     let resolvedSupplierName = supplierName;
 
@@ -197,6 +196,7 @@ export async function POST(request: NextRequest) {
     const totalItems = normalizedItems.length;
     const totalCost = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
     const purchaseNumber = await generatePurchaseNumber();
+    const referenceNumber = purchaseNumber;
 
     const purchase = await prisma.$transaction(async (tx) => {
       const createdPurchase = await tx.purchase.create({

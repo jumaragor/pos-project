@@ -2,7 +2,7 @@
 
 import { Role, UserStatus } from "@prisma/client";
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { PencilIcon, TrashIcon } from "@/components/ui/app-icons";
@@ -422,6 +422,14 @@ export function ConfigurationScreen() {
   const [uomMode, setUomMode] = useState<"create" | "edit">("create");
   const [activeUom, setActiveUom] = useState<UomRow | null>(null);
   const [uomForm, setUomForm] = useState<UomForm>(emptyUomForm);
+  const loadedTabDataRef = useRef({
+    users: false,
+    categories: false,
+    uoms: false
+  });
+  const usersRequestRef = useRef<Promise<void> | null>(null);
+  const categoriesRequestRef = useRef<Promise<void> | null>(null);
+  const uomsRequestRef = useRef<Promise<void> | null>(null);
 
   const isAdmin = ["OWNER", "MANAGER"].includes(data?.user?.role ?? "");
 
@@ -434,33 +442,64 @@ export function ConfigurationScreen() {
     );
   }
 
-  async function loadUsers() {
-    const response = await fetch("/api/users");
-    if (!response.ok) return;
-    const payload = await response.json();
-    setUsers(payload);
+  async function loadUsers(force = false) {
+    if (!force && loadedTabDataRef.current.users) return;
+    if (!force && usersRequestRef.current) return usersRequestRef.current;
+    usersRequestRef.current = (async () => {
+      const response = await fetch("/api/users");
+      if (!response.ok) return;
+      const payload = await response.json();
+      setUsers(payload);
+      loadedTabDataRef.current.users = true;
+    })().finally(() => {
+      usersRequestRef.current = null;
+    });
+    return usersRequestRef.current;
   }
 
-  async function loadCategories() {
-    const response = await fetch("/api/categories?pageSize=100");
-    if (!response.ok) return;
-    const payload = (await response.json()) as { items: CategoryRow[] };
-    setCategories(payload.items);
+  async function loadCategories(force = false) {
+    if (!force && loadedTabDataRef.current.categories) return;
+    if (!force && categoriesRequestRef.current) return categoriesRequestRef.current;
+    categoriesRequestRef.current = (async () => {
+      const response = await fetch("/api/categories?pageSize=100");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { items: CategoryRow[] };
+      setCategories(payload.items);
+      loadedTabDataRef.current.categories = true;
+    })().finally(() => {
+      categoriesRequestRef.current = null;
+    });
+    return categoriesRequestRef.current;
   }
 
-  async function loadUoms() {
-    const response = await fetch("/api/uoms?pageSize=200");
-    if (!response.ok) return;
-    const payload = (await response.json()) as { items: UomRow[] };
-    setUoms(payload.items);
+  async function loadUoms(force = false) {
+    if (!force && loadedTabDataRef.current.uoms) return;
+    if (!force && uomsRequestRef.current) return uomsRequestRef.current;
+    uomsRequestRef.current = (async () => {
+      const response = await fetch("/api/uoms?pageSize=200");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { items: UomRow[] };
+      setUoms(payload.items);
+      loadedTabDataRef.current.uoms = true;
+    })().finally(() => {
+      uomsRequestRef.current = null;
+    });
+    return uomsRequestRef.current;
   }
 
   useEffect(() => {
     void loadSettings();
-    void loadUsers();
-    void loadCategories();
-    void loadUoms();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "users") {
+      void loadUsers();
+    } else if (activeTab === "categories") {
+      void loadCategories();
+    } else if (activeTab === "product") {
+      void loadUoms();
+    }
+  }, [activeTab]);
 
   function openCreateUser() {
     setUserMode("create");
@@ -564,7 +603,7 @@ export function ConfigurationScreen() {
       return;
     }
     setUserOpen(false);
-    await loadUsers();
+    await loadUsers(true);
     const payload = await response.json();
     if (activeUser?.id === data?.user?.id) {
       window.dispatchEvent(
@@ -602,7 +641,7 @@ export function ConfigurationScreen() {
       return;
     }
     setCategoryOpen(false);
-    await loadCategories();
+    await loadCategories(true);
     success(categoryMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
   }
 
@@ -631,7 +670,7 @@ export function ConfigurationScreen() {
     }
 
     setUomOpen(false);
-    await loadUoms();
+    await loadUoms(true);
     success(uomMode === "edit" ? "Changes saved successfully" : "Record saved successfully");
   }
 
@@ -653,7 +692,7 @@ export function ConfigurationScreen() {
       alert(payload.error ?? "Failed to update category status.");
       return;
     }
-    await loadCategories();
+    await loadCategories(true);
     success("Process successful");
   }
 
@@ -665,7 +704,7 @@ export function ConfigurationScreen() {
       alert(payload.error ?? "Failed to delete category.");
       return;
     }
-    await loadCategories();
+    await loadCategories(true);
     success("Deleted successfully");
   }
 
@@ -677,7 +716,7 @@ export function ConfigurationScreen() {
       alert(payload.error ?? "Failed to delete UOM.");
       return;
     }
-    await loadUoms();
+    await loadUoms(true);
     success("Deleted successfully");
   }
 
@@ -699,7 +738,7 @@ export function ConfigurationScreen() {
       alert(payload.error ?? "Failed to update user status.");
       return;
     }
-    await loadUsers();
+    await loadUsers(true);
     success("Process successful");
   }
 

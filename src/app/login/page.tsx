@@ -79,7 +79,6 @@ function LoginPageContent() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const callbackUrl = normalizeCallbackUrl(searchParams.get("callbackUrl"));
@@ -226,11 +225,11 @@ function LoginPageContent() {
                   <span>Password</span>
                   <input
                     placeholder="Enter password"
-                    type={showPassword ? "text" : "password"}
+                    type="password"
                     name="password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
-                    autoComplete={showPassword ? "off" : "new-password"}
+                    autoComplete="new-password"
                   />
                 </label>
                 <div className="login-options">
@@ -238,9 +237,6 @@ function LoginPageContent() {
                     <input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
                     <span>Remember me</span>
                   </label>
-                  <button type="button" className="login-link-btn" onClick={() => setShowPassword((prev) => !prev)}>
-                    {showPassword ? "Hide" : "Show"} password
-                  </button>
                 </div>
                 <PrimaryButton type="submit" disabled={isLoading} className="login-submit">
                   <span className="login-submit-content">

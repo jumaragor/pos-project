@@ -8,11 +8,17 @@ import { buildVoidedPurchaseNote, isVoidedPurchaseNote } from "@/lib/purchase-ut
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   try {
     const actor = await getAuthUser();
     if (!actor) {
       return unauthorized();
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const voidReason = typeof body?.reason === "string" ? body.reason.trim() : "";
+    if (!voidReason) {
+      return badRequest("Void reason is required");
     }
 
     const { id } = await params;
@@ -77,7 +83,7 @@ export async function POST(_request: Request, { params }: Params) {
         where: { id: purchase.id },
         data: {
           status: PurchaseStatus.DRAFT,
-          notes: buildVoidedPurchaseNote(purchase.notes)
+          notes: buildVoidedPurchaseNote(purchase.notes, voidReason)
         },
         include: { items: { orderBy: { id: "asc" } } }
       });

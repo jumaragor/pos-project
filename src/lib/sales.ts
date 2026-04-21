@@ -68,21 +68,25 @@ export async function listSales(filters: SalesFilters = {}) {
   const transactions = await prisma.transaction.findMany({
     where: buildSalesWhere(filters),
     orderBy: { createdAt: "desc" },
-    include: {
-      user: { select: { name: true } },
-      items: {
-        select: {
-          subtotal: true
-        }
-      }
+    select: {
+      id: true,
+      number: true,
+      createdAt: true,
+      status: true,
+      discountTotal: true,
+      totalAmount: true,
+      cashAmount: true,
+      qrAmount: true,
+      paymentMethod: true,
+      user: { select: { name: true } }
     }
   });
 
   return transactions.map((transaction) => {
-    const subtotal = transaction.items.reduce((sum, item) => sum + Number(item.subtotal), 0);
     const discount = Number(transaction.discountTotal);
     const tax = 0;
     const total = Number(transaction.totalAmount);
+    const subtotal = total + discount;
     const paymentAmount = toPaymentAmount(
       transaction.cashAmount == null ? null : Number(transaction.cashAmount),
       transaction.qrAmount == null ? null : Number(transaction.qrAmount)

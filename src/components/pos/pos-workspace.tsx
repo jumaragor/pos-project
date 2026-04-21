@@ -137,6 +137,8 @@ export function PosWorkspace({
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [isConfirmingCheckout, setIsConfirmingCheckout] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<TransactionRow[]>([]);
+  const [transactionsLoaded, setTransactionsLoaded] = useState(false);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredProducts = useMemo(() => {
@@ -168,14 +170,16 @@ export function PosWorkspace({
   );
 
   async function loadTransactions() {
-    const response = await fetch("/api/pos/transactions");
-    const data = await response.json();
-    setRecentTransactions(data);
+    setLoadingTransactions(true);
+    try {
+      const response = await fetch("/api/pos/transactions");
+      const data = await response.json();
+      setRecentTransactions(data);
+      setTransactionsLoaded(true);
+    } finally {
+      setLoadingTransactions(false);
+    }
   }
-
-  useEffect(() => {
-    void loadTransactions();
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -233,6 +237,11 @@ export function PosWorkspace({
       inputRef.current?.focus();
     }
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "transactions" || transactionsLoaded || loadingTransactions) return;
+    void loadTransactions();
+  }, [loadingTransactions, transactionsLoaded, view]);
 
   function addProduct(product: ProductLite) {
     setCart((prev) => {
@@ -584,7 +593,11 @@ export function PosWorkspace({
                 </tr>
               </thead>
               <tbody>
-                {recentTransactions.map((row) => (
+                {loadingTransactions ? (
+                  <tr>
+                    <td colSpan={6} className="muted">Loading transactions...</td>
+                  </tr>
+                ) : recentTransactions.map((row) => (
                   <tr key={row.id}>
                     <td>{row.number}</td>
                     <td>{row.status === TransactionStatus.DRAFT ? "HELD" : row.status}</td>

@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
   const filter = request.nextUrl.searchParams.get("filter") ?? "active";
   const category = request.nextUrl.searchParams.get("category")?.trim();
   const all = request.nextUrl.searchParams.get("all") === "true";
+  const mode = request.nextUrl.searchParams.get("mode")?.trim();
   const pageSize = parsePositiveInt(request.nextUrl.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
   const requestedPage = parsePositiveInt(request.nextUrl.searchParams.get("page"), 1, 10_000);
   const sortKey = request.nextUrl.searchParams.get("sortKey") ?? "name";
@@ -69,6 +70,34 @@ export async function GET(request: NextRequest) {
           : sortKey === "sellingPrice"
             ? { sellingPrice: sortDir }
             : { name: sortDir };
+
+  if (mode === "lookup") {
+    const [total, products] = await Promise.all([
+      prisma.product.count({ where: searchableWhere }),
+      prisma.product.findMany({
+        where: searchableWhere,
+        orderBy,
+        ...(all ? {} : { skip: (requestedPage - 1) * pageSize, take: pageSize }),
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          description: true,
+          unit: true,
+          unitCost: true
+        }
+      })
+    ]);
+
+    return ok({
+      items: products.map((product) => ({
+        ...product,
+        description: product.description ?? "",
+        unitCost: Number(product.unitCost)
+      })),
+      pagination: buildPagination(requestedPage, all ? Math.max(total, 1) : pageSize, total)
+    });
+  }
 
   const [inventorySettings, total, products, statsRows, categoryRows] = await Promise.all([
     getInventorySettings(),
