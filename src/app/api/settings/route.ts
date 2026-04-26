@@ -14,6 +14,8 @@ type LoginCarouselImageSetting = {
   isActive: boolean;
 };
 
+const defaultPrintMode = process.env.NEXT_PUBLIC_PRINT_BRIDGE_TOKEN ? "windows-bridge" : "browser";
+
 const defaultSettings: Record<string, string> = {
   allowNegativeStock: "false",
   lowStockThreshold: "10",
@@ -30,6 +32,10 @@ const defaultSettings: Record<string, string> = {
   allowPriceOverride: "false",
   allowDiscountEntry: "true",
   autoPrintReceipt: "false",
+  printMode: defaultPrintMode,
+  androidBridgeUrl: "http://127.0.0.1:17890",
+  androidBridgeToken: "",
+  enableBrowserPrintFallback: "true",
   showCashierName: "true",
   showChangeAmount: "true",
   defaultPaymentMethod: "CASH",
@@ -96,6 +102,9 @@ function coerceValue(key: string, raw: string) {
     } catch {
       return [];
     }
+  }
+  if (["printMode", "androidBridgeUrl", "androidBridgeToken"].includes(key)) {
+    return raw;
   }
   if (raw === "true") return true;
   if (raw === "false") return false;
