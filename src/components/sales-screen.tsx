@@ -158,7 +158,6 @@ export function SalesScreen({ initialSales }: { initialSales: SalesInitialState 
                   <td colSpan={12}>
                     <div className="sales-empty-state">
                       <strong>No sales transactions found.</strong>
-                      <span>Try adjusting the selected date range or come back after new POS sales are completed.</span>
                     </div>
                   </td>
                 </tr>

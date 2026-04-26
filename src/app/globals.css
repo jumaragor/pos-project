@@ -2184,6 +2184,7 @@ tbody tr:last-child td {
 
 .pos-product-grid-line {
   grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .pos-product-card {
@@ -2205,8 +2206,9 @@ tbody tr:last-child td {
 
 .pos-product-card-line {
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   min-height: 0;
+  padding-block: 12px;
 }
 
 .pos-product-image {
@@ -2263,11 +2265,26 @@ tbody tr:last-child td {
   gap: 4px;
 }
 
+.pos-product-card-line .pos-product-name {
+  min-height: 0;
+}
+
+.pos-product-card-line .pos-product-sku,
+.pos-product-card-line .pos-product-guide {
+  display: block;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+
 .pos-product-meta-line {
   justify-content: flex-end;
   min-width: 124px;
   flex-direction: column;
   align-items: flex-end;
+  align-self: start;
+  gap: 6px;
 }
 
 .pos-product-price {
