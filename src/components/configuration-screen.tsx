@@ -775,6 +775,26 @@ export function ConfigurationScreen() {
     success(successMessage);
   }
 
+  async function testAndroidBridge() {
+    try {
+      const url = (settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "");
+      const response = await fetch(`${url}/health`, { method: "GET" });
+      if (!response.ok) {
+        const fallbackResponse = await fetch(`${url}/status`, { method: "GET" });
+        if (!fallbackResponse.ok) {
+          throw new Error(`Bridge returned HTTP ${fallbackResponse.status}`);
+        }
+      }
+      success("Android bridge is reachable.");
+    } catch (bridgeError) {
+      alert(
+        bridgeError instanceof Error
+          ? `Android bridge test failed: ${bridgeError.message}`
+          : "Android bridge test failed."
+      );
+    }
+  }
+
   function updateLowStockThresholdInput(value: string) {
     if (!/^\d*$/.test(value)) return;
     setLowStockThresholdInput(value);
@@ -1303,6 +1323,9 @@ export function ConfigurationScreen() {
                         </span>
                       </div>
                     </label>
+                    <SecondaryButton className="configuration-inline-btn" onClick={testAndroidBridge}>
+                      Test Android Bridge
+                    </SecondaryButton>
                   </div>
                 </div>
 

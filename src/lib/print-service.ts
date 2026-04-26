@@ -34,11 +34,17 @@ function withTimeout(timeoutMs = REQUEST_TIMEOUT_MS) {
   return { controller, timeout };
 }
 
-function fallbackToBrowserPrint(): PrintReceiptResult {
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Printer bridge failed.";
+}
+
+function fallbackToBrowserPrint(reason?: string): PrintReceiptResult {
   window.print();
   return {
     mode: "browser-fallback",
-    message: "Printer bridge unavailable. Browser print opened instead."
+    message: reason
+      ? `${reason} Browser print opened instead.`
+      : "Printer bridge unavailable. Browser print opened instead."
   };
 }
 
@@ -87,13 +93,17 @@ async function readAndroidBridgeResponse(response: Response) {
 async function checkAndroidBridgeHealth(url: string) {
   const { controller, timeout } = withTimeout(1500);
   try {
-    const response = await fetch(`${cleanBridgeUrl(url)}/health`, {
-      method: "GET",
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error("Android ESC/POS bridge health check failed.");
+    const bridgeUrl = cleanBridgeUrl(url);
+    let lastStatus = 0;
+    for (const endpoint of ["health", "status"]) {
+      const response = await fetch(`${bridgeUrl}/${endpoint}`, {
+        method: "GET",
+        signal: controller.signal
+      });
+      if (response.ok) return;
+      lastStatus = response.status;
     }
+    throw new Error(`Android ESC/POS bridge health check failed (${lastStatus || "no response"}).`);
   } finally {
     window.clearTimeout(timeout);
   }
@@ -159,7 +169,7 @@ export async function printReceipt(receipt: ReceiptData, settings: PrintSettings
     return await printViaWindowsBridge(receipt);
   } catch (error) {
     if (settings.enableBrowserPrintFallback) {
-      return fallbackToBrowserPrint();
+      return fallbackToBrowserPrint(errorMessage(error));
     }
     throw error;
   }
