@@ -84,15 +84,33 @@ async function readAndroidBridgeResponse(response: Response) {
   }
 }
 
+async function checkAndroidBridgeHealth(url: string) {
+  const { controller, timeout } = withTimeout(1500);
+  try {
+    const response = await fetch(`${cleanBridgeUrl(url)}/health`, {
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error("Android ESC/POS bridge health check failed.");
+    }
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 async function printViaAndroidBridge(receipt: ReceiptData, settings: PrintSettings): Promise<PrintReceiptResult> {
   const token = settings.androidBridgeToken.trim();
   if (!token) {
     throw new Error("Android bridge token is not configured.");
   }
 
+  const bridgeUrl = cleanBridgeUrl(settings.androidBridgeUrl);
+  await checkAndroidBridgeHealth(bridgeUrl);
+
   const { controller, timeout } = withTimeout();
   try {
-    const response = await fetch(`${cleanBridgeUrl(settings.androidBridgeUrl)}/print`, {
+    const response = await fetch(`${bridgeUrl}/print`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -109,7 +127,7 @@ async function printViaAndroidBridge(receipt: ReceiptData, settings: PrintSettin
 
     return {
       mode: "android-escpos-bridge",
-      message: payload.message || "Receipt sent to Android ESC/POS bridge."
+      message: "Receipt printed successfully."
     };
   } finally {
     window.clearTimeout(timeout);
