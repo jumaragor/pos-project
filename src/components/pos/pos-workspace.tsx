@@ -11,6 +11,7 @@ import { ReceiptPrint } from "@/components/pos/receipt-print";
 import { CartLine, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency } from "@/lib/format";
+import { isPrintBridgeConfigured, printReceiptViaBridge } from "@/lib/print-bridge";
 import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
@@ -76,7 +77,7 @@ export function PosWorkspace({
   initialSettings: PosWorkspaceSettings;
 }) {
   const { data: session } = useSession();
-  const { success } = useToast();
+  const { success, warning } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
   const [enableProductCategories, setEnableProductCategories] = useState(initialSettings.enableProductCategories);
   const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(initialSettings.enableCompatibleUnits);
@@ -268,11 +269,29 @@ export function PosWorkspace({
     let frameOne = 0;
     let frameTwo = 0;
 
-    // Wait for the shared receipt component to mount before invoking the browser print dialog.
+    const receipt = printableReceipt;
+
+    async function printQueuedReceipt() {
+      lastPrintedIdRef.current = queuedPrintId;
+
+      if (isPrintBridgeConfigured()) {
+        try {
+          await printReceiptViaBridge(receipt);
+          success("Receipt sent to printer");
+          return;
+        } catch (printError) {
+          console.warn("Printer bridge failed; falling back to browser print.", printError);
+          warning("Printer bridge unavailable. Opening browser print instead.");
+        }
+      }
+
+      window.print();
+    }
+
+    // Wait for the shared receipt component to mount before printing or using browser fallback.
     frameOne = window.requestAnimationFrame(() => {
       frameTwo = window.requestAnimationFrame(() => {
-        lastPrintedIdRef.current = queuedPrintId;
-        window.print();
+        void printQueuedReceipt();
       });
     });
 
@@ -280,7 +299,7 @@ export function PosWorkspace({
       if (frameOne) window.cancelAnimationFrame(frameOne);
       if (frameTwo) window.cancelAnimationFrame(frameTwo);
     };
-  }, [printableReceipt, queuedPrintId]);
+  }, [printableReceipt, queuedPrintId, success, warning]);
 
   function addProduct(product: ProductLite) {
     setCart((prev) => {
