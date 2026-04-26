@@ -34,6 +34,7 @@ const defaultSettings: Record<string, string> = {
   autoPrintReceipt: "false",
   printMode: defaultPrintMode,
   androidBridgeUrl: "http://127.0.0.1:17890",
+  androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
   androidBridgeToken: "",
   enableBrowserPrintFallback: "true",
   showCashierName: "true",
@@ -103,7 +104,7 @@ function coerceValue(key: string, raw: string) {
       return [];
     }
   }
-  if (["printMode", "androidBridgeUrl", "androidBridgeToken"].includes(key)) {
+  if (["printMode", "androidBridgeUrl", "androidBridgeHealthUrl", "androidBridgeToken"].includes(key)) {
     return raw;
   }
   if (raw === "true") return true;

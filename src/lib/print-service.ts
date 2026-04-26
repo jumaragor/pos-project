@@ -6,6 +6,7 @@ export type PrintMode = "browser" | "windows-bridge" | "android-escpos-bridge";
 export type PrintSettings = {
   printMode: PrintMode;
   androidBridgeUrl: string;
+  androidBridgeHealthUrl: string;
   androidBridgeToken: string;
   enableBrowserPrintFallback: boolean;
 };
@@ -22,10 +23,17 @@ type AndroidBridgeResponse = {
 };
 
 const DEFAULT_ANDROID_BRIDGE_URL = "http://127.0.0.1:17890";
+const DEFAULT_ANDROID_BRIDGE_HEALTH_URL = `${DEFAULT_ANDROID_BRIDGE_URL}/health`;
 const REQUEST_TIMEOUT_MS = 3500;
 
 function cleanBridgeUrl(value: string) {
   return (value || DEFAULT_ANDROID_BRIDGE_URL).replace(/\/+$/, "");
+}
+
+function cleanHealthUrl(value: string, bridgeUrl: string) {
+  const trimmed = value.trim();
+  if (trimmed) return trimmed;
+  return `${cleanBridgeUrl(bridgeUrl)}/health`;
 }
 
 function withTimeout(timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -90,20 +98,26 @@ async function readAndroidBridgeResponse(response: Response) {
   }
 }
 
-async function checkAndroidBridgeHealth(url: string) {
+async function checkAndroidBridgeHealth(healthUrl: string) {
   const { controller, timeout } = withTimeout(1500);
   try {
-    const bridgeUrl = cleanBridgeUrl(url);
-    let lastStatus = 0;
-    for (const endpoint of ["health", "status"]) {
-      const response = await fetch(`${bridgeUrl}/${endpoint}`, {
+    const response = await fetch(healthUrl, {
+      method: "GET",
+      signal: controller.signal
+    });
+    if (response.ok) return;
+
+    if (healthUrl.endsWith("/health")) {
+      const statusUrl = healthUrl.replace(/\/health$/, "/status");
+      const statusResponse = await fetch(statusUrl, {
         method: "GET",
         signal: controller.signal
       });
-      if (response.ok) return;
-      lastStatus = response.status;
+      if (statusResponse.ok) return;
+      throw new Error(`Android ESC/POS bridge health check failed at ${healthUrl} and ${statusUrl}.`);
     }
-    throw new Error(`Android ESC/POS bridge health check failed (${lastStatus || "no response"}).`);
+
+    throw new Error(`Android ESC/POS bridge health check failed at ${healthUrl} with HTTP ${response.status}.`);
   } finally {
     window.clearTimeout(timeout);
   }
@@ -116,7 +130,7 @@ async function printViaAndroidBridge(receipt: ReceiptData, settings: PrintSettin
   }
 
   const bridgeUrl = cleanBridgeUrl(settings.androidBridgeUrl);
-  await checkAndroidBridgeHealth(bridgeUrl);
+  await checkAndroidBridgeHealth(cleanHealthUrl(settings.androidBridgeHealthUrl || DEFAULT_ANDROID_BRIDGE_HEALTH_URL, bridgeUrl));
 
   const { controller, timeout } = withTimeout();
   try {

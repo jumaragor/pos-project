@@ -12,6 +12,7 @@ type PosSettingsSnapshot = {
   autoPrintReceipt: boolean;
   printMode: PrintMode;
   androidBridgeUrl: string;
+  androidBridgeHealthUrl: string;
   androidBridgeToken: string;
   enableBrowserPrintFallback: boolean;
   productDisplayMode: "tile" | "line";
@@ -29,6 +30,7 @@ const defaultSettings = {
   autoPrintReceipt: false,
   printMode: (process.env.NEXT_PUBLIC_PRINT_BRIDGE_TOKEN ? "windows-bridge" : "browser") as PrintMode,
   androidBridgeUrl: "http://127.0.0.1:17890",
+  androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
   androidBridgeToken: "",
   enableBrowserPrintFallback: true,
   productDisplayMode: "tile" as const,
@@ -82,6 +84,7 @@ export async function getPosSettings() {
             "autoPrintReceipt",
             "printMode",
             "androidBridgeUrl",
+            "androidBridgeHealthUrl",
             "androidBridgeToken",
             "enableBrowserPrintFallback",
             "productDisplayMode",
@@ -142,6 +145,8 @@ export async function getPosSettings() {
           ? valueByKey.get("printMode")
           : defaultSettings.printMode) as PrintMode,
         androidBridgeUrl: valueByKey.get("androidBridgeUrl") ?? defaultSettings.androidBridgeUrl,
+        androidBridgeHealthUrl:
+          valueByKey.get("androidBridgeHealthUrl") ?? defaultSettings.androidBridgeHealthUrl,
         androidBridgeToken:
           valueByKey.get("androidBridgeToken") ?? defaultSettings.androidBridgeToken,
         enableBrowserPrintFallback: toBoolean(

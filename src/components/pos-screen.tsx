@@ -60,6 +60,7 @@ type CompletedSale = {
 type LegacyPrintSettings = {
   printMode: PrintMode;
   androidBridgeUrl: string;
+  androidBridgeHealthUrl: string;
   androidBridgeToken: string;
   enableBrowserPrintFallback: boolean;
   businessName: string;
@@ -85,6 +86,7 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
   const [printSettings, setPrintSettings] = useState<LegacyPrintSettings>({
     printMode: "browser",
     androidBridgeUrl: "http://127.0.0.1:17890",
+    androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
     androidBridgeToken: "",
     enableBrowserPrintFallback: true,
     businessName: "MicroBiz POS",
@@ -121,6 +123,7 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
           ? (payload.printMode as PrintMode)
           : "browser",
         androidBridgeUrl: String(payload.androidBridgeUrl ?? "http://127.0.0.1:17890"),
+        androidBridgeHealthUrl: String(payload.androidBridgeHealthUrl ?? "http://127.0.0.1:17890/health"),
         androidBridgeToken: String(payload.androidBridgeToken ?? ""),
         enableBrowserPrintFallback: payload.enableBrowserPrintFallback !== false,
         businessName: String(payload.businessName ?? "MicroBiz POS"),

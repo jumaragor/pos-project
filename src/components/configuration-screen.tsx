@@ -106,6 +106,7 @@ type SettingsShape = {
   autoPrintReceipt: boolean;
   printMode: PrintMode;
   androidBridgeUrl: string;
+  androidBridgeHealthUrl: string;
   androidBridgeToken: string;
   enableBrowserPrintFallback: boolean;
   showCashierName: boolean;
@@ -167,6 +168,7 @@ const defaultSettings: SettingsShape = {
   autoPrintReceipt: false,
   printMode: process.env.NEXT_PUBLIC_PRINT_BRIDGE_TOKEN ? "windows-bridge" : "browser",
   androidBridgeUrl: "http://127.0.0.1:17890",
+  androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
   androidBridgeToken: "",
   enableBrowserPrintFallback: true,
   showCashierName: true,
@@ -777,12 +779,17 @@ export function ConfigurationScreen() {
 
   async function testAndroidBridge() {
     try {
-      const url = (settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "");
-      const response = await fetch(`${url}/health`, { method: "GET" });
+      const healthUrl =
+        settings.androidBridgeHealthUrl.trim() ||
+        `${(settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "")}/health`;
+      const response = await fetch(healthUrl, { method: "GET" });
       if (!response.ok) {
-        const fallbackResponse = await fetch(`${url}/status`, { method: "GET" });
+        const fallbackUrl = healthUrl.endsWith("/health")
+          ? healthUrl.replace(/\/health$/, "/status")
+          : `${(settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "")}/status`;
+        const fallbackResponse = await fetch(fallbackUrl, { method: "GET" });
         if (!fallbackResponse.ok) {
-          throw new Error(`Bridge returned HTTP ${fallbackResponse.status}`);
+          throw new Error(`Bridge returned HTTP ${fallbackResponse.status} from ${fallbackUrl}`);
         }
       }
       success("Android bridge is reachable.");
@@ -1292,6 +1299,19 @@ export function ConfigurationScreen() {
                       />
                     </label>
                     <label className="form-field configuration-pos-payment-field">
+                      <span className="field-label">Android Health Check URL</span>
+                      <input
+                        value={settings.androidBridgeHealthUrl}
+                        placeholder="http://127.0.0.1:17890/health"
+                        onChange={(e) =>
+                          setSettings((p) => ({
+                            ...p,
+                            androidBridgeHealthUrl: e.target.value
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field configuration-pos-payment-field">
                       <span className="field-label">Android Bridge Token</span>
                       <input
                         value={settings.androidBridgeToken}
@@ -1410,6 +1430,7 @@ export function ConfigurationScreen() {
                         "autoPrintReceipt",
                         "printMode",
                         "androidBridgeUrl",
+                        "androidBridgeHealthUrl",
                         "androidBridgeToken",
                         "enableBrowserPrintFallback",
                         "showCashierName",

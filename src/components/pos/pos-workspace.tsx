@@ -44,6 +44,7 @@ type PosWorkspaceSettings = {
   autoPrintReceipt: boolean;
   printMode: PrintMode;
   androidBridgeUrl: string;
+  androidBridgeHealthUrl: string;
   androidBridgeToken: string;
   enableBrowserPrintFallback: boolean;
   productDisplayMode: "tile" | "line";
@@ -93,6 +94,9 @@ export function PosWorkspace({
   const [printMode, setPrintMode] = useState<PrintMode>(initialSettings.printMode ?? "browser");
   const [androidBridgeUrl, setAndroidBridgeUrl] = useState(
     initialSettings.androidBridgeUrl || "http://127.0.0.1:17890"
+  );
+  const [androidBridgeHealthUrl, setAndroidBridgeHealthUrl] = useState(
+    initialSettings.androidBridgeHealthUrl || "http://127.0.0.1:17890/health"
   );
   const [androidBridgeToken, setAndroidBridgeToken] = useState(initialSettings.androidBridgeToken || "");
   const [enableBrowserPrintFallback, setEnableBrowserPrintFallback] = useState(
@@ -174,6 +178,7 @@ export function PosWorkspace({
           : "browser"
       );
       setAndroidBridgeUrl(String(payload.androidBridgeUrl ?? "http://127.0.0.1:17890"));
+      setAndroidBridgeHealthUrl(String(payload.androidBridgeHealthUrl ?? "http://127.0.0.1:17890/health"));
       setAndroidBridgeToken(String(payload.androidBridgeToken ?? ""));
       setEnableBrowserPrintFallback(payload.enableBrowserPrintFallback !== false);
       setProductDisplayMode(payload.productDisplayMode === "line" ? "line" : "tile");
@@ -298,6 +303,7 @@ export function PosWorkspace({
         const result = await printReceipt(receipt, {
           printMode,
           androidBridgeUrl,
+          androidBridgeHealthUrl,
           androidBridgeToken,
           enableBrowserPrintFallback
         });
@@ -326,6 +332,7 @@ export function PosWorkspace({
     };
   }, [
     androidBridgeToken,
+    androidBridgeHealthUrl,
     androidBridgeUrl,
     enableBrowserPrintFallback,
     error,
