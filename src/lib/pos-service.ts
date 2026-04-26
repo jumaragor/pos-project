@@ -8,6 +8,7 @@ import {
   TransactionStatus
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { generateSaleNumber } from "@/lib/document-sequences";
 import {
   applyInventoryAdjustment,
   applySaleIssue,
@@ -202,6 +203,10 @@ export async function createSale(input: SaleInput) {
         transaction = await tx.transaction.update({
           where: { id: existingDraft.id },
           data: {
+            number:
+              existingDraft.number.startsWith("HLD-")
+                ? await generateSaleNumber(tx)
+                : existingDraft.number,
             customerId: input.customerId,
             userId: input.userId,
             totalAmount: totals.total,
@@ -213,8 +218,7 @@ export async function createSale(input: SaleInput) {
           }
         });
       } else {
-        const count = await tx.transaction.count();
-        const number = `TX-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`;
+        const number = await generateSaleNumber(tx);
         transaction = await tx.transaction.create({
           data: {
             number,

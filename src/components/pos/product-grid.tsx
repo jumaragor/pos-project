@@ -4,6 +4,7 @@ import { formatCurrency } from "@/lib/format";
 
 type ProductGridProps = {
   products: ProductLite[];
+  displayMode?: "tile" | "line";
   showProductPhotos?: boolean;
   showCompatibleUnits?: boolean;
   showLowStockAlerts?: boolean;
@@ -32,6 +33,7 @@ function ProductImage({ product }: { product: ProductLite }) {
 
 export function ProductGrid({
   products,
+  displayMode = "tile",
   showProductPhotos = true,
   showCompatibleUnits = true,
   showLowStockAlerts = true,
@@ -39,23 +41,33 @@ export function ProductGrid({
   onAdd
 }: ProductGridProps) {
   return (
-    <div className="pos-product-grid">
+    <div className={displayMode === "line" ? "pos-product-grid pos-product-grid-line" : "pos-product-grid"}>
       {products.map((product) => {
         const lowStock = showLowStockAlerts && product.stockQty <= lowStockThreshold;
         return (
-          <button key={product.id} type="button" className="pos-product-card" onClick={() => onAdd(product)}>
+          <button
+            key={product.id}
+            type="button"
+            className={displayMode === "line" ? "pos-product-card pos-product-card-line" : "pos-product-card"}
+            onClick={() => onAdd(product)}
+            title={product.name}
+          >
             {showProductPhotos ? <ProductImage product={product} /> : null}
-            <div className="pos-product-name">{product.name}</div>
-            <div className="pos-product-meta">
+            <div className={displayMode === "line" ? "pos-product-main" : ""}>
+              <div className="pos-product-name" title={product.name}>
+                {product.name}
+              </div>
+              {product.uomCode || product.uomName ? (
+                <div className="pos-product-sku">{product.uomCode ?? product.uomName}</div>
+              ) : null}
+              {showCompatibleUnits && product.compatibleUnits ? (
+                <div className="pos-product-guide">{product.compatibleUnits}</div>
+              ) : null}
+            </div>
+            <div className={displayMode === "line" ? "pos-product-meta pos-product-meta-line" : "pos-product-meta"}>
               <span className="pos-product-price">{formatCurrency(product.sellingPrice)}</span>
               {lowStock ? <span className="pos-stock-badge">Low Stock</span> : null}
             </div>
-            {product.uomCode || product.uomName ? (
-              <div className="pos-product-sku">{product.uomCode ?? product.uomName}</div>
-            ) : null}
-            {showCompatibleUnits && product.compatibleUnits ? (
-              <div className="pos-product-guide">{product.compatibleUnits}</div>
-            ) : null}
           </button>
         );
       })}

@@ -1,10 +1,13 @@
 import { PaymentMethod, TransactionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildUomLookup } from "@/lib/uom-lookup";
+import { buildPagination } from "@/lib/pagination";
 
 export type SalesFilters = {
   dateFrom?: string | null;
   dateTo?: string | null;
+  page?: number;
+  pageSize?: number;
 };
 
 export type SalesListRow = {
@@ -38,6 +41,13 @@ export type SalesDetail = SalesListRow & {
   }>;
 };
 
+export type SalesPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
 function buildSalesWhere(filters: SalesFilters) {
   const createdAt: { gte?: Date; lte?: Date } = {};
 
@@ -65,24 +75,32 @@ function toChangeAmount(paymentAmount: number | null, total: number) {
 }
 
 export async function listSales(filters: SalesFilters = {}) {
-  const transactions = await prisma.transaction.findMany({
-    where: buildSalesWhere(filters),
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      number: true,
-      createdAt: true,
-      status: true,
-      discountTotal: true,
-      totalAmount: true,
-      cashAmount: true,
-      qrAmount: true,
-      paymentMethod: true,
-      user: { select: { name: true } }
-    }
-  });
+  const page = Math.max(1, Number(filters.page ?? 1));
+  const pageSize = Math.max(1, Number(filters.pageSize ?? 25));
+  const where = buildSalesWhere(filters);
+  const [total, transactions] = await Promise.all([
+    prisma.transaction.count({ where }),
+    prisma.transaction.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        number: true,
+        createdAt: true,
+        status: true,
+        discountTotal: true,
+        totalAmount: true,
+        cashAmount: true,
+        qrAmount: true,
+        paymentMethod: true,
+        user: { select: { name: true } }
+      }
+    })
+  ]);
 
-  return transactions.map((transaction) => {
+  const items = transactions.map((transaction) => {
     const discount = Number(transaction.discountTotal);
     const tax = 0;
     const total = Number(transaction.totalAmount);
@@ -107,6 +125,11 @@ export async function listSales(filters: SalesFilters = {}) {
       paymentMethod: transaction.paymentMethod
     } satisfies SalesListRow;
   });
+
+  return {
+    items,
+    pagination: buildPagination(page, pageSize, total)
+  };
 }
 
 export async function getSaleDetail(id: string) {

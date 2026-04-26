@@ -17,7 +17,7 @@ export default async function SalesPage() {
     redirect("/dashboard");
   }
 
-  const initialSales = await listSales();
+  const initialSales = await listSales({ page: 1, pageSize: 25 });
 
   return <SalesScreen initialSales={initialSales} />;
 }

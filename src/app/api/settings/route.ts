@@ -4,6 +4,7 @@ import { forbidden, ok, unauthorized } from "@/lib/http";
 import { getAuthUser } from "@/lib/api-auth";
 import { invalidateInventorySettingsCache } from "@/lib/inventory-settings";
 import { invalidateProductSettingsCache } from "@/lib/product-settings";
+import { invalidatePosSettingsCache } from "@/lib/pos-settings";
 
 type LoginCarouselImageSetting = {
   id: string;
@@ -32,6 +33,8 @@ const defaultSettings: Record<string, string> = {
   showCashierName: "true",
   showChangeAmount: "true",
   defaultPaymentMethod: "CASH",
+  productDisplayMode: "tile",
+  posProductsPerPage: "50",
   storeName: "MicroBiz POS",
   businessName: "",
   storeAddress: "",
@@ -139,6 +142,7 @@ export async function PUT(request: NextRequest) {
   );
   invalidateInventorySettingsCache();
   invalidateProductSettingsCache();
+  invalidatePosSettingsCache();
   const refreshed = await prisma.appSetting.findMany({
     where: { key: { in: Object.keys(defaultSettings) } }
   });

@@ -106,6 +106,8 @@ type SettingsShape = {
   showCashierName: boolean;
   showChangeAmount: boolean;
   defaultPaymentMethod: "CASH" | "GCASH" | "CARD";
+  productDisplayMode: "tile" | "line";
+  posProductsPerPage: number;
   storeName: string;
   businessName: string;
   storeAddress: string;
@@ -161,6 +163,8 @@ const defaultSettings: SettingsShape = {
   showCashierName: true,
   showChangeAmount: true,
   defaultPaymentMethod: "CASH",
+  productDisplayMode: "tile",
+  posProductsPerPage: 50,
   storeName: "MicroBiz POS",
   businessName: "",
   storeAddress: "",
@@ -1245,6 +1249,48 @@ export function ConfigurationScreen() {
                     </select>
                   </label>
                 </div>
+
+                <div className="configuration-pos-payment-block">
+                  <div className="configuration-uom-copy">
+                    <h3 className="section-title configuration-subtitle">Product List Display</h3>
+                    <div className="field-help">
+                      Control how products appear in POS and how many filtered items are shown per page.
+                    </div>
+                  </div>
+                  <div className="configuration-inline-grid configuration-tax-grid">
+                    <label className="form-field configuration-pos-payment-field">
+                      <span className="field-label">Product Display Mode</span>
+                      <select
+                        value={settings.productDisplayMode}
+                        onChange={(e) =>
+                          setSettings((p) => ({
+                            ...p,
+                            productDisplayMode: e.target.value as SettingsShape["productDisplayMode"]
+                          }))
+                        }
+                      >
+                        <option value="tile">Tile</option>
+                        <option value="line">Line</option>
+                      </select>
+                    </label>
+                    <label className="form-field configuration-pos-payment-field">
+                      <span className="field-label">Products Per Page</span>
+                      <select
+                        value={String(settings.posProductsPerPage)}
+                        onChange={(e) =>
+                          setSettings((p) => ({
+                            ...p,
+                            posProductsPerPage: Number(e.target.value)
+                          }))
+                        }
+                      >
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
               </div>
             )}
             <div className="configuration-form-shell configuration-product-page-actions-shell">
@@ -1260,7 +1306,9 @@ export function ConfigurationScreen() {
                         "autoPrintReceipt",
                         "showCashierName",
                         "showChangeAmount",
-                        "defaultPaymentMethod"
+                        "defaultPaymentMethod",
+                        "productDisplayMode",
+                        "posProductsPerPage"
                       ])
                     }
                   >

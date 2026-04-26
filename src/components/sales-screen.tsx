@@ -3,14 +3,20 @@
 import { useMemo, useRef, useState } from "react";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency, formatNumber } from "@/lib/format";
-import type { SalesDetail, SalesListRow } from "@/lib/sales";
+import type { SalesDetail, SalesListRow, SalesPagination } from "@/lib/sales";
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString("en-PH");
 }
 
-export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) {
-  const [sales, setSales] = useState(initialSales);
+type SalesInitialState = {
+  items: SalesListRow[];
+  pagination: SalesPagination;
+};
+
+export function SalesScreen({ initialSales }: { initialSales: SalesInitialState }) {
+  const [sales, setSales] = useState(initialSales.items);
+  const [pagination, setPagination] = useState(initialSales.pagination);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,16 +26,19 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
 
   const summary = useMemo(
     () => ({
-      count: sales.length,
+      count: pagination.total,
       total: sales.reduce((sum, sale) => sum + sale.total, 0)
     }),
-    [sales]
+    [pagination.total, sales]
   );
 
-  async function loadSales(nextDateFrom = dateFrom, nextDateTo = dateTo) {
+  async function loadSales(nextDateFrom = dateFrom, nextDateTo = dateTo, nextPage = pagination.page) {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        pageSize: "25"
+      });
       if (nextDateFrom) params.set("dateFrom", nextDateFrom);
       if (nextDateTo) params.set("dateTo", nextDateTo);
 
@@ -40,6 +49,7 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
         return;
       }
       setSales(payload.items ?? []);
+      setPagination(payload.pagination ?? initialSales.pagination);
     } finally {
       setLoading(false);
     }
@@ -69,22 +79,11 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
   function clearFilters() {
     setDateFrom("");
     setDateTo("");
-    void loadSales("", "");
+    void loadSales("", "", 1);
   }
 
   return (
     <div className="grid sales-screen">
-      <div className="card">
-        <div className="inventory-table-head">
-          <div>
-            <h2 className="section-title">Sales</h2>
-            <div className="field-help">
-              Review completed POS transactions, inspect itemized sale details, and filter records by date.
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="card sales-filters-card">
         <div className="sales-filters-grid">
           <label className="sales-filter-field">
@@ -96,7 +95,7 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
             <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
           </label>
           <div className="sales-filter-actions">
-            <SecondaryButton onClick={() => void loadSales()} disabled={loading}>
+            <SecondaryButton onClick={() => void loadSales(dateFrom, dateTo, 1)} disabled={loading}>
               {loading ? "Loading..." : "Apply Filters"}
             </SecondaryButton>
             <SecondaryButton onClick={clearFilters} disabled={loading && !dateFrom && !dateTo}>
@@ -166,6 +165,32 @@ export function SalesScreen({ initialSales }: { initialSales: SalesListRow[] }) 
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="inventory-pagination">
+          <div>
+            Showing {sales.length ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to{" "}
+            {(pagination.page - 1) * pagination.pageSize + sales.length} of {pagination.total}
+          </div>
+          <div className="row">
+            <button
+              className="btn-secondary"
+              disabled={pagination.page <= 1 || loading}
+              onClick={() => void loadSales(dateFrom, dateTo, pagination.page - 1)}
+            >
+              Prev
+            </button>
+            <span className="badge">
+              Page {pagination.page} / {pagination.totalPages}
+            </span>
+            <button
+              className="btn-secondary"
+              disabled={pagination.page >= pagination.totalPages || loading}
+              onClick={() => void loadSales(dateFrom, dateTo, pagination.page + 1)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

@@ -8,12 +8,19 @@ import { CategoryTabs } from "@/components/pos/category-tabs";
 import { CartPanel } from "@/components/pos/cart-panel";
 import { CheckoutModal } from "@/components/pos/checkout-modal";
 import { ReceiptPrint } from "@/components/pos/receipt-print";
-import { CartLine, CustomerLite, ProductLite } from "@/components/pos/types";
+import { CartLine, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency } from "@/lib/format";
 import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
+
+type PaginationState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 
 type ReceiptRecord = ReceiptSource;
 
@@ -24,7 +31,19 @@ type TransactionRow = {
   totalAmount: string;
   createdAt?: string;
   user?: { name?: string | null; username?: string | null } | null;
-  customer?: { name: string } | null;
+};
+
+type PosWorkspaceSettings = {
+  enableProductCategories: boolean;
+  enableCompatibleUnits: boolean;
+  allowProductPhotoUpload: boolean;
+  enableLowStockAlerts: boolean;
+  lowStockThreshold: number;
+  allowDiscountEntry: boolean;
+  autoPrintReceipt: boolean;
+  productDisplayMode: "tile" | "line";
+  posProductsPerPage: number;
+  receiptSettings: ReceiptSettings;
 };
 
 const defaultReceiptSettings: ReceiptSettings = {
@@ -45,90 +64,38 @@ const defaultReceiptSettings: ReceiptSettings = {
   taxInclusivePricing: false
 };
 
-function normalizeSearchText(value: string | null | undefined) {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gi, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function tokenizeSearchText(value: string | null | undefined) {
-  const normalized = normalizeSearchText(value);
-  return normalized ? normalized.split(" ") : [];
-}
-
-function matchesOrderedPrefixTokens(queryTokens: string[], targetTokens: string[]) {
-  if (!queryTokens.length) return true;
-  if (!targetTokens.length) return false;
-
-  let targetIndex = 0;
-
-  for (const queryToken of queryTokens) {
-    let matched = false;
-
-    while (targetIndex < targetTokens.length) {
-      if (targetTokens[targetIndex].startsWith(queryToken)) {
-        matched = true;
-        targetIndex += 1;
-        break;
-      }
-      targetIndex += 1;
-    }
-
-    if (!matched) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function matchesPosProductQuery(product: ProductLite, rawQuery: string) {
-  const trimmedQuery = rawQuery.trim();
-  if (!trimmedQuery) return true;
-
-  const normalizedQuery = normalizeSearchText(trimmedQuery);
-  const queryTokens = tokenizeSearchText(trimmedQuery);
-  const normalizedName = normalizeSearchText(product.name);
-  const normalizedSku = normalizeSearchText(product.sku);
-  const normalizedBarcode = normalizeSearchText(product.barcode);
-
-  if (
-    normalizedName.includes(normalizedQuery) ||
-    normalizedSku.includes(normalizedQuery) ||
-    normalizedBarcode.includes(normalizedQuery)
-  ) {
-    return true;
-  }
-
-  return (
-    matchesOrderedPrefixTokens(queryTokens, tokenizeSearchText(product.name)) ||
-    matchesOrderedPrefixTokens(queryTokens, tokenizeSearchText(product.sku))
-  );
-}
-
 export function PosWorkspace({
-  products,
-  customers
+  initialProducts,
+  initialPagination,
+  initialCategoryOptions,
+  initialSettings
 }: {
-  products: ProductLite[];
-  customers: CustomerLite[];
+  initialProducts: ProductLite[];
+  initialPagination: PaginationState;
+  initialCategoryOptions: string[];
+  initialSettings: PosWorkspaceSettings;
 }) {
   const { data: session } = useSession();
   const { success } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
-  const [enableProductCategories, setEnableProductCategories] = useState(true);
-  const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(true);
-  const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(true);
-  const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(true);
-  const [lowStockThreshold, setLowStockThreshold] = useState(10);
-  const [allowDiscountEntry, setAllowDiscountEntry] = useState(true);
-  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
-  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(defaultReceiptSettings);
+  const [enableProductCategories, setEnableProductCategories] = useState(initialSettings.enableProductCategories);
+  const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(initialSettings.enableCompatibleUnits);
+  const [allowProductPhotoUpload, setAllowProductPhotoUpload] = useState(initialSettings.allowProductPhotoUpload);
+  const [enableLowStockAlerts, setEnableLowStockAlerts] = useState(initialSettings.enableLowStockAlerts);
+  const [lowStockThreshold, setLowStockThreshold] = useState(initialSettings.lowStockThreshold);
+  const [allowDiscountEntry, setAllowDiscountEntry] = useState(initialSettings.allowDiscountEntry);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(initialSettings.autoPrintReceipt);
+  const [productDisplayMode, setProductDisplayMode] = useState<"tile" | "line">(initialSettings.productDisplayMode);
+  const [productsPerPage, setProductsPerPage] = useState(initialSettings.posProductsPerPage);
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(
+    initialSettings.receiptSettings ?? defaultReceiptSettings
+  );
+  const [products, setProducts] = useState<ProductLite[]>(initialProducts);
+  const [productPagination, setProductPagination] = useState<PaginationState>(initialPagination);
+  const [categoryOptions] = useState<string[]>(initialCategoryOptions);
   const [activeCategory, setActiveCategory] = useState("All");
   const [query, setQuery] = useState("");
-  const [customerId, setCustomerId] = useState("");
+  const [productPage, setProductPage] = useState(1);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeDraftNumber, setActiveDraftNumber] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -139,24 +106,16 @@ export function PosWorkspace({
   const [recentTransactions, setRecentTransactions] = useState<TransactionRow[]>([]);
   const [transactionsLoaded, setTransactionsLoaded] = useState(false);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [queuedPrintId, setQueuedPrintId] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const filteredProducts = useMemo(() => {
-    const q = query.trim();
-    return products.filter((product) => {
-      const categoryMatch =
-        !enableProductCategories || activeCategory === "All" || product.category === activeCategory;
-      const queryMatch = matchesPosProductQuery(product, q);
-      return categoryMatch && queryMatch;
-    });
-  }, [activeCategory, enableProductCategories, products, query]);
-
-  const categoryOptions = useMemo(() => {
-    return Array.from(new Set(products.map((product) => product.category).filter(Boolean))) as string[];
-  }, [products]);
+  const lastPrintedIdRef = useRef(0);
+  const hasSkippedInitialProductFetchRef = useRef(false);
   const visibleCategories = useMemo(() => ["All", ...categoryOptions], [categoryOptions]);
   const showCategoryFilters = enableProductCategories && categoryOptions.length > 0;
   const compactCategoryFilters = visibleCategories.length <= 4;
+  const productPageSize = Math.max(1, productsPerPage || 50);
+  const totalProductPages = Math.max(1, productPagination.totalPages || 1);
 
   const subtotal = cart.reduce((acc, line) => acc + line.qty * line.price, 0);
   const parsedDiscount = Math.max(0, Number(discountInput || 0));
@@ -196,6 +155,8 @@ export function PosWorkspace({
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
       setAllowDiscountEntry(payload.allowDiscountEntry !== false);
       setAutoPrintReceipt(payload.autoPrintReceipt === true);
+      setProductDisplayMode(payload.productDisplayMode === "line" ? "line" : "tile");
+      setProductsPerPage(Math.max(1, Number(payload.posProductsPerPage ?? 50)));
       setReceiptSettings({
         businessName: String(payload.businessName ?? ""),
         storeName: String(payload.storeName ?? "MicroBiz POS"),
@@ -215,7 +176,6 @@ export function PosWorkspace({
       });
     }
 
-    void loadProductSettings();
     const handleSettingsUpdated = () => {
       void loadProductSettings();
     };
@@ -233,6 +193,63 @@ export function PosWorkspace({
   }, [enableProductCategories]);
 
   useEffect(() => {
+    setProductPage(1);
+  }, [activeCategory, productPageSize, query]);
+
+  useEffect(() => {
+    setProductPage((prev) => Math.min(prev, totalProductPages));
+  }, [totalProductPages]);
+
+  useEffect(() => {
+    if (!hasSkippedInitialProductFetchRef.current) {
+      hasSkippedInitialProductFetchRef.current = true;
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setLoadingProducts(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(productPage),
+          pageSize: String(productPageSize)
+        });
+        if (query.trim()) {
+          params.set("q", query.trim());
+        }
+        if (enableProductCategories && activeCategory !== "All") {
+          params.set("category", activeCategory);
+        }
+
+        const response = await fetch(`/api/pos/products?${params.toString()}`, {
+          signal: controller.signal
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          items: ProductLite[];
+          pagination: PaginationState;
+        };
+        if (controller.signal.aborted) return;
+        setProducts(payload.items);
+        setProductPagination(payload.pagination);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") {
+          console.error("Failed to load POS products", error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoadingProducts(false);
+        }
+      }
+    }, query.trim() ? 180 : 0);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [activeCategory, enableProductCategories, productPage, productPageSize, query]);
+
+  useEffect(() => {
     if (view === "pos") {
       inputRef.current?.focus();
     }
@@ -242,6 +259,28 @@ export function PosWorkspace({
     if (view !== "transactions" || transactionsLoaded || loadingTransactions) return;
     void loadTransactions();
   }, [loadingTransactions, transactionsLoaded, view]);
+
+  useEffect(() => {
+    if (!queuedPrintId || queuedPrintId === lastPrintedIdRef.current || !printableReceipt) {
+      return;
+    }
+
+    let frameOne = 0;
+    let frameTwo = 0;
+
+    // Wait for the shared receipt component to mount before invoking the browser print dialog.
+    frameOne = window.requestAnimationFrame(() => {
+      frameTwo = window.requestAnimationFrame(() => {
+        lastPrintedIdRef.current = queuedPrintId;
+        window.print();
+      });
+    });
+
+    return () => {
+      if (frameOne) window.cancelAnimationFrame(frameOne);
+      if (frameTwo) window.cancelAnimationFrame(frameTwo);
+    };
+  }, [printableReceipt, queuedPrintId]);
 
   function addProduct(product: ProductLite) {
     setCart((prev) => {
@@ -258,7 +297,6 @@ export function PosWorkspace({
   function resetOrderState() {
     setCart([]);
     setDiscountInput("");
-    setCustomerId("");
     setActiveDraftId(null);
     setActiveDraftNumber(null);
     setCheckoutOpen(false);
@@ -272,12 +310,11 @@ export function PosWorkspace({
   }
 
   function buildSaleSnapshot(amountPaid: number, txNumber?: string, synced = true): ReceiptRecord {
-    const customer = customers.find((row) => row.id === customerId);
     return {
       txNumber,
       synced,
       createdAt: new Date().toISOString(),
-      customerName: customer?.name,
+      customerName: undefined,
       cashierName: session?.user.name ?? session?.user.username ?? undefined,
       paymentMethod: PaymentMethod.CASH,
       cashAmount: amountPaid,
@@ -296,10 +333,10 @@ export function PosWorkspace({
     };
   }
 
-  function printSaleTransaction(sale: ReceiptRecord | null = completedSale) {
+  function queueSaleTransactionPrint(sale: ReceiptRecord | null = completedSale) {
     if (!sale) return;
     setCompletedSale(sale);
-    window.print();
+    setQueuedPrintId((current) => current + 1);
   }
 
   async function loadReceiptRecord(transactionId: string) {
@@ -347,7 +384,6 @@ export function PosWorkspace({
     setIsConfirmingCheckout(true);
 
     const payload = {
-      customerId: customerId || undefined,
       paymentMethod: PaymentMethod.CASH,
       cashAmount: amountPaid,
       draftId: activeDraftId || undefined,
@@ -395,9 +431,7 @@ export function PosWorkspace({
       success(`Sale ${data.number} completed`);
       inputRef.current?.focus();
       if (autoPrintReceipt) {
-        window.setTimeout(() => {
-          printSaleTransaction(snapshot);
-        }, 50);
+        queueSaleTransactionPrint(snapshot);
       }
     } finally {
       setIsConfirmingCheckout(false);
@@ -410,7 +444,6 @@ export function PosWorkspace({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        customerId: customerId || undefined,
         paymentMethod: PaymentMethod.CASH,
         draftId: activeDraftId || undefined,
         orderDiscount: discount > 0 ? { type: "FIXED" as const, value: discount } : undefined,
@@ -441,7 +474,6 @@ export function PosWorkspace({
       alert(data.error ?? "Failed to load held order");
       return;
     }
-    setCustomerId(data.customerId ?? "");
     setActiveDraftId(data.id);
     setActiveDraftNumber(data.number ?? null);
     setCart(
@@ -479,9 +511,7 @@ export function PosWorkspace({
   async function printTransaction(transactionId: string) {
     try {
       const receipt = await loadReceiptRecord(transactionId);
-      window.setTimeout(() => {
-        printSaleTransaction(receipt);
-      }, 50);
+      queueSaleTransactionPrint(receipt);
     } catch (loadError) {
       alert(loadError instanceof Error ? loadError.message : "Failed to print receipt");
     }
@@ -497,8 +527,8 @@ export function PosWorkspace({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              if (filteredProducts[0]) {
-                addProduct(filteredProducts[0]);
+              if (products[0]) {
+                addProduct(products[0]);
               }
             }
           }}
@@ -533,13 +563,39 @@ export function PosWorkspace({
         <div className="pos-layout">
           <section className="pos-left">
             <ProductGrid
-              products={filteredProducts}
+              products={products}
+              displayMode={productDisplayMode}
               showProductPhotos={allowProductPhotoUpload}
               showCompatibleUnits={enableCompatibleUnits}
               showLowStockAlerts={enableLowStockAlerts}
               lowStockThreshold={lowStockThreshold}
               onAdd={addProduct}
             />
+            {loadingProducts ? <div className="muted pos-products-loading">Loading products...</div> : null}
+            <div className="inventory-pagination pos-product-pagination">
+              <div>
+                Showing {products.length ? (productPagination.page - 1) * productPagination.pageSize + 1 : 0} to{" "}
+                {(productPagination.page - 1) * productPagination.pageSize + products.length} of{" "}
+                {productPagination.total}
+              </div>
+              <div className="row">
+                <button
+                  className="btn-secondary"
+                  disabled={productPage <= 1 || loadingProducts}
+                  onClick={() => setProductPage((prev) => Math.max(prev - 1, 1))}
+                >
+                  Prev
+                </button>
+                <span className="badge">Page {productPage} / {totalProductPages}</span>
+                <button
+                  className="btn-secondary"
+                  disabled={productPage >= totalProductPages || loadingProducts}
+                  onClick={() => setProductPage((prev) => Math.min(prev + 1, totalProductPages))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </section>
           <CartPanel
             cart={cart}

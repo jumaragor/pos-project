@@ -88,7 +88,7 @@ async function loadPurchaseEntryOptions() {
   if (!purchaseEntryOptionsPromise) {
     purchaseEntryOptionsPromise = Promise.all([
       fetch("/api/products?filter=all&all=true&sortKey=name&sortDir=asc&mode=lookup"),
-      fetch("/api/suppliers?activeOnly=true&pageSize=200")
+      fetch("/api/suppliers?activeOnly=true&all=true")
     ]).then(async ([productsResponse, suppliersResponse]) => {
       const [productsPayload, suppliersPayload] = await Promise.all([
         productsResponse.ok
@@ -159,6 +159,7 @@ export function PurchaseEntryScreen({
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveAction, setSaveAction] = useState<PurchaseStatus | null>(null);
+  const [persistedPurchaseId, setPersistedPurchaseId] = useState<string | null>(initialPurchase?.id ?? null);
   const [remarksOpen] = useState(mode !== "create" ? Boolean(initialPurchase?.notes?.trim()) : false);
   const [supplierSearch, setSupplierSearch] = useState(initialPurchase?.supplierName ?? "");
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
@@ -197,12 +198,11 @@ export function PurchaseEntryScreen({
       }
 
       if (mode === "create") {
-        const defaultSupplier = loadedSuppliers.find((supplier) => supplier.status === SupplierStatus.ACTIVE);
         setForm((prev) => ({
           ...prev,
-          supplierId: prev.supplierId || defaultSupplier?.id || ""
+          supplierId: prev.supplierId || ""
         }));
-        setSupplierSearch((prev) => prev || (defaultSupplier ? supplierOptionLabel(defaultSupplier) : ""));
+        setSupplierSearch((prev) => prev || "");
       } else if (initialPurchase?.supplierId) {
         const selectedSupplier = loadedSuppliers.find((supplier) => supplier.id === initialPurchase.supplierId);
         setSupplierSearch(selectedSupplier ? supplierOptionLabel(selectedSupplier) : initialPurchase.supplierName ?? "");
@@ -242,6 +242,8 @@ export function PurchaseEntryScreen({
     () => new Map(products.map((product) => [product.id, product])),
     [products]
   );
+  const existingPurchaseId = persistedPurchaseId ?? initialPurchase?.id ?? null;
+  const isPersistedPurchase = Boolean(existingPurchaseId);
   const displayedStatus = mode === "create" ? PurchaseStatus.DRAFT : initialPurchase?.status ?? PurchaseStatus.DRAFT;
   const isVoided = isVoidedPurchaseNote(initialPurchase?.notes);
 
@@ -456,8 +458,8 @@ export function PurchaseEntryScreen({
       }))
     };
 
-    const target = mode === "edit" && initialPurchase ? `/api/purchases/${initialPurchase.id}` : "/api/purchases";
-    const method = mode === "edit" ? "PUT" : "POST";
+    const target = existingPurchaseId ? `/api/purchases/${existingPurchaseId}` : "/api/purchases";
+    const method = existingPurchaseId ? "PUT" : "POST";
 
     setSaving(true);
     setSaveAction(nextStatus);
@@ -472,6 +474,9 @@ export function PurchaseEntryScreen({
         alert(result.error ?? "Failed to save purchase");
         return;
       }
+      if (typeof result.id === "string" && result.id) {
+        setPersistedPurchaseId(result.id);
+      }
       setForm((prev) => ({
         ...prev,
         referenceNumber: typeof result.referenceNumber === "string" ? result.referenceNumber : prev.referenceNumber
@@ -479,7 +484,7 @@ export function PurchaseEntryScreen({
       success(
         nextStatus === PurchaseStatus.DRAFT
           ? "Changes saved successfully"
-          : mode === "edit"
+          : isPersistedPurchase
             ? "Changes saved successfully"
             : "Purchase added successfully"
       );
@@ -525,11 +530,6 @@ export function PurchaseEntryScreen({
                   <SearchIcon className="purchases-supplier-search-icon" />
                   <input placeholder="Select supplier" value={supplierSearch} readOnly onClick={openSupplierPicker} />
                 </div>
-                {canEdit && supplierSearch ? (
-                  <button type="button" className="purchases-supplier-link" onClick={clearSupplierSelection}>
-                    Clear supplier
-                  </button>
-                ) : null}
               </div>
               <div className="form-field purchases-header-date">
                 <label className="field-label">Purchase Date</label>

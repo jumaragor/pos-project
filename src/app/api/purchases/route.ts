@@ -1,6 +1,7 @@
 import { InventoryReferenceType, PurchaseStatus } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { getAuthUser } from "@/lib/api-auth";
+import { generatePurchaseNumber } from "@/lib/document-sequences";
 import { badRequest, created, ok, serverError, unauthorized } from "@/lib/http";
 import { getInventorySettings } from "@/lib/inventory-settings";
 import { applyPurchaseReceipt } from "@/lib/inventory-valuation";
@@ -59,20 +60,6 @@ function parsePurchaseDate(value: unknown) {
     throw new Error("purchaseDate is invalid");
   }
   return date;
-}
-
-async function generatePurchaseNumber() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const prefix = `PUR-${yyyy}${mm}${dd}`;
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  const countToday = await prisma.purchase.count({
-    where: { createdAt: { gte: todayStart, lt: todayEnd } }
-  });
-  return `${prefix}-${String(countToday + 1).padStart(3, "0")}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -195,10 +182,9 @@ export async function POST(request: NextRequest) {
     }));
     const totalItems = normalizedItems.length;
     const totalCost = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const purchaseNumber = await generatePurchaseNumber();
-    const referenceNumber = purchaseNumber;
-
     const purchase = await prisma.$transaction(async (tx) => {
+      const purchaseNumber = await generatePurchaseNumber(tx, purchaseDate);
+      const referenceNumber = purchaseNumber;
       const createdPurchase = await tx.purchase.create({
         data: {
           purchaseNumber,

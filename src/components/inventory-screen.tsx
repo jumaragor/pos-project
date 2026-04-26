@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/buttons";
 import { useToast } from "@/components/toast-provider";
@@ -155,6 +156,7 @@ export function InventoryScreen({
 }) {
   const { data: session } = useSession();
   const { success } = useToast();
+  const router = useRouter();
   const isAdmin = ["OWNER", "MANAGER"].includes(session?.user?.role ?? "");
   const [products, setProducts] = useState(initialProducts);
   const [pagination, setPagination] = useState(initialPagination);
@@ -584,7 +586,12 @@ export function InventoryScreen({
     }
   }
 
+  function openInventoryDetails(productId: string) {
+    router.push(`/inventory/${productId}`);
+  }
+
   function toggleActionsMenu(event: ReactMouseEvent<HTMLButtonElement>, productId: string) {
+    event.stopPropagation();
     const buttonRect = event.currentTarget.getBoundingClientRect();
     setActionsMenuState((current) =>
       current?.productId === productId
@@ -1221,7 +1228,19 @@ export function InventoryScreen({
                 products.map((item) => {
                 const stockStatus = getStockStatus(item);
                 return (
-                <tr key={item.id}>
+                <tr
+                  key={item.id}
+                  className="inventory-clickable-row"
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => openInventoryDetails(item.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openInventoryDetails(item.id);
+                    }
+                  }}
+                >
                   {productSettings.allowProductPhotoUpload ? (
                     <td>
                       {item.photoUrl ? (
@@ -1244,13 +1263,18 @@ export function InventoryScreen({
                   <td>
                     <span className={`badge ${stockStatus.className}`}>{stockStatus.label}</span>
                   </td>
-                  <td className="actions-cell">
+                  <td
+                    className="actions-cell"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <div className="inventory-actions">
                       <button
                         type="button"
                         className="icon-action-btn"
                         aria-label={`Edit ${item.name}`}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           setActionsMenuState(null);
                           openEdit(item);
                         }}

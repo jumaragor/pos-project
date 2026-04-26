@@ -187,9 +187,6 @@ function LoginPageContent() {
             <div className="login-card">
               <div className="login-card-copy">
                 <h2 className="login-card-title">Sign in</h2>
-                <p className="login-card-subtitle">
-                  Access your POS workspace and continue managing daily store operations.
-                </p>
               </div>
               <form className="login-form" onSubmit={handleSubmit} autoComplete="off">
                 <input

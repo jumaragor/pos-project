@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
   try {
     const query = request.nextUrl.searchParams.get("q")?.trim();
     const activeOnly = request.nextUrl.searchParams.get("activeOnly") === "true";
+    const all = request.nextUrl.searchParams.get("all") === "true";
     const pageSize = parsePositiveInt(request.nextUrl.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
     const requestedPage = parsePositiveInt(request.nextUrl.searchParams.get("page"), 1, 10_000);
     const where = {
@@ -68,13 +69,12 @@ export async function GET(request: NextRequest) {
           status: true
         },
         orderBy: [{ status: "asc" }, { supplierName: "asc" }],
-        skip: (requestedPage - 1) * pageSize,
-        take: pageSize
+        ...(all ? {} : { skip: (requestedPage - 1) * pageSize, take: pageSize })
       })
     ]);
     return ok({
       items: suppliers,
-      pagination: buildPagination(requestedPage, pageSize, total)
+      pagination: buildPagination(requestedPage, all ? Math.max(total, 1) : pageSize, total)
     });
   } catch (error) {
     return serverError(error instanceof Error ? error.message : "Failed to fetch suppliers");

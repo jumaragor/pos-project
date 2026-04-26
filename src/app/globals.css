@@ -2182,6 +2182,10 @@ tbody tr:last-child td {
   overflow: auto;
 }
 
+.pos-product-grid-line {
+  grid-template-columns: 1fr;
+}
+
 .pos-product-card {
   text-align: left;
   background: #ffffff;
@@ -2189,13 +2193,20 @@ tbody tr:last-child td {
   border-radius: 12px;
   padding: var(--space-md);
   display: grid;
+  align-content: start;
   gap: var(--space-sm);
-  min-height: 156px;
+  min-height: 172px;
 }
 
 .pos-product-card:hover {
   border-color: #cbd5e1;
   background: #fafcff;
+}
+
+.pos-product-card-line {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 0;
 }
 
 .pos-product-image {
@@ -2208,6 +2219,11 @@ tbody tr:last-child td {
   color: var(--gray-400);
   font-size: 12px;
   overflow: hidden;
+}
+
+.pos-product-card-line .pos-product-image {
+  width: 56px;
+  height: 56px;
 }
 
 .pos-product-image-content {
@@ -2224,6 +2240,14 @@ tbody tr:last-child td {
   font-weight: 600;
   font-size: 14px;
   line-height: 1.2;
+  min-height: calc(1.2em * 2);
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .pos-product-meta {
@@ -2231,6 +2255,19 @@ tbody tr:last-child td {
   justify-content: space-between;
   align-items: center;
   gap: var(--space-sm);
+}
+
+.pos-product-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pos-product-meta-line {
+  justify-content: flex-end;
+  min-width: 124px;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .pos-product-price {
@@ -2255,6 +2292,11 @@ tbody tr:last-child td {
   color: var(--gray-700);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.pos-product-pagination {
+  border-top: 1px solid var(--gray-100);
+  padding-top: 12px;
 }
 
 .pos-category-tabs {
@@ -3137,6 +3179,19 @@ tbody tr:last-child td {
   text-align: right;
 }
 
+.inventory-clickable-row {
+  cursor: pointer;
+}
+
+.inventory-clickable-row:hover {
+  background: #fbfdff;
+}
+
+.inventory-clickable-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 .icon-action-btn {
   width: 34px;
   height: 34px;
@@ -3306,6 +3361,118 @@ tbody tr:last-child td {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.inventory-detail-page {
+  gap: 16px;
+}
+
+.inventory-detail-head {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.inventory-detail-back {
+  color: var(--color-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.inventory-detail-back:hover {
+  text-decoration: underline;
+}
+
+.inventory-detail-title {
+  margin: 0;
+}
+
+.inventory-detail-grid {
+  align-items: start;
+}
+
+.inventory-detail-card {
+  gap: 14px;
+}
+
+.inventory-summary-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.inventory-summary-columns {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.inventory-summary-column {
+  display: grid;
+  gap: 18px;
+}
+
+.inventory-summary-section {
+  display: grid;
+  gap: 12px;
+}
+
+.inventory-summary-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gray-700);
+}
+
+.inventory-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.inventory-summary-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inventory-summary-field-span-2 {
+  grid-column: span 2;
+}
+
+.inventory-summary-field span {
+  color: var(--gray-700);
+  font-size: 13px;
+}
+
+.inventory-summary-field strong {
+  color: var(--ink);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.inventory-detail-table table {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .inventory-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-summary-columns {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .inventory-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-summary-field-span-2 {
+    grid-column: span 1;
+  }
 }
 
 .inventory-form-grid-span-2 {
