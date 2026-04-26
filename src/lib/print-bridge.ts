@@ -47,7 +47,7 @@ function paymentLabel(receipt: ReceiptData) {
 
 function toBridgeReceipt(receipt: ReceiptData) {
   return {
-    header: receipt.businessName || "MicroBiz POS",
+    header: "",
     subheader: joinReceiptSubheader(receipt),
     invoice: receipt.transactionNumber,
     cashier: receipt.cashierName,
