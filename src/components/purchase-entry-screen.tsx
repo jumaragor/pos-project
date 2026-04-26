@@ -419,12 +419,6 @@ export function PurchaseEntryScreen({
     setSupplierPickerQuery("");
   }
 
-  function clearSupplierSelection() {
-    if (!canEdit) return;
-    setForm((prev) => ({ ...prev, supplierId: "" }));
-    setSupplierSearch("");
-  }
-
   async function savePurchase(nextStatus: PurchaseStatus) {
     if (!form.purchaseDate) {
       alert("Purchase date is required");
