@@ -5016,6 +5016,34 @@ tbody tr:last-child td {
     margin-top: 2px;
   }
 
+  .receipt-payment-stack {
+    display: grid;
+    gap: 5px;
+    margin-top: 6px;
+    margin-bottom: 3px;
+  }
+
+  .receipt-payment-line {
+    display: grid;
+    gap: 1px;
+  }
+
+  .receipt-payment-line span,
+  .receipt-payment-line strong {
+    display: block;
+    text-align: left;
+  }
+
+  .receipt-payment-line span {
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .receipt-payment-line strong {
+    font-size: 12px;
+    font-weight: 400;
+  }
+
   .receipt-divider {
     border-top: 1px dashed #000000;
     margin: 6px 0;

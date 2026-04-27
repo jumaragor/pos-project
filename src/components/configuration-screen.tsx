@@ -14,7 +14,6 @@ import {
   ThemePresetKey,
   themePresets
 } from "@/lib/theme";
-import type { PrintMode } from "@/lib/print-service";
 
 type TabKey =
   | "users"
@@ -104,11 +103,6 @@ type SettingsShape = {
   allowPriceOverride: boolean;
   allowDiscountEntry: boolean;
   autoPrintReceipt: boolean;
-  printMode: PrintMode;
-  androidBridgeUrl: string;
-  androidBridgeHealthUrl: string;
-  androidBridgeToken: string;
-  enableBrowserPrintFallback: boolean;
   showCashierName: boolean;
   showChangeAmount: boolean;
   defaultPaymentMethod: "CASH" | "GCASH" | "CARD";
@@ -166,11 +160,6 @@ const defaultSettings: SettingsShape = {
   allowPriceOverride: false,
   allowDiscountEntry: true,
   autoPrintReceipt: false,
-  printMode: process.env.NEXT_PUBLIC_PRINT_BRIDGE_TOKEN ? "windows-bridge" : "browser",
-  androidBridgeUrl: "http://127.0.0.1:17890",
-  androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
-  androidBridgeToken: "",
-  enableBrowserPrintFallback: true,
   showCashierName: true,
   showChangeAmount: true,
   defaultPaymentMethod: "CASH",
@@ -777,31 +766,6 @@ export function ConfigurationScreen() {
     success(successMessage);
   }
 
-  async function testAndroidBridge() {
-    try {
-      const healthUrl =
-        settings.androidBridgeHealthUrl.trim() ||
-        `${(settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "")}/health`;
-      const response = await fetch(healthUrl, { method: "GET" });
-      if (!response.ok) {
-        const fallbackUrl = healthUrl.endsWith("/health")
-          ? healthUrl.replace(/\/health$/, "/status")
-          : `${(settings.androidBridgeUrl || "http://127.0.0.1:17890").replace(/\/+$/, "")}/status`;
-        const fallbackResponse = await fetch(fallbackUrl, { method: "GET" });
-        if (!fallbackResponse.ok) {
-          throw new Error(`Bridge returned HTTP ${fallbackResponse.status} from ${fallbackUrl}`);
-        }
-      }
-      success("Android bridge is reachable.");
-    } catch (bridgeError) {
-      alert(
-        bridgeError instanceof Error
-          ? `Android bridge test failed: ${bridgeError.message}`
-          : "Android bridge test failed."
-      );
-    }
-  }
-
   function updateLowStockThresholdInput(value: string) {
     if (!/^\d*$/.test(value)) return;
     setLowStockThresholdInput(value);
@@ -1263,94 +1227,6 @@ export function ConfigurationScreen() {
 
                 <div className="configuration-pos-payment-block">
                   <div className="configuration-uom-copy">
-                    <h3 className="section-title configuration-subtitle">Receipt Printing</h3>
-                    <div className="field-help">
-                      Choose how POS receipts are sent. Windows local bridge settings remain separate from Android ESC/POS bridge settings.
-                    </div>
-                  </div>
-                  <div className="configuration-inline-grid configuration-tax-grid">
-                    <label className="form-field configuration-pos-payment-field">
-                      <span className="field-label">Print Mode</span>
-                      <select
-                        value={settings.printMode}
-                        onChange={(e) =>
-                          setSettings((p) => ({
-                            ...p,
-                            printMode: e.target.value as PrintMode
-                          }))
-                        }
-                      >
-                        <option value="browser">Browser Print</option>
-                        <option value="windows-bridge">Windows Local Bridge</option>
-                        <option value="android-escpos-bridge">Android ESC/POS Bridge</option>
-                      </select>
-                    </label>
-                    <label className="form-field configuration-pos-payment-field">
-                      <span className="field-label">Android Bridge URL</span>
-                      <input
-                        value={settings.androidBridgeUrl}
-                        placeholder="http://127.0.0.1:17890"
-                        onChange={(e) =>
-                          setSettings((p) => ({
-                            ...p,
-                            androidBridgeUrl: e.target.value
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="form-field configuration-pos-payment-field">
-                      <span className="field-label">Android Health Check URL</span>
-                      <input
-                        value={settings.androidBridgeHealthUrl}
-                        placeholder="http://127.0.0.1:17890/health"
-                        onChange={(e) =>
-                          setSettings((p) => ({
-                            ...p,
-                            androidBridgeHealthUrl: e.target.value
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="form-field configuration-pos-payment-field">
-                      <span className="field-label">Android Bridge Token</span>
-                      <input
-                        value={settings.androidBridgeToken}
-                        onChange={(e) =>
-                          setSettings((p) => ({
-                            ...p,
-                            androidBridgeToken: e.target.value
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="configuration-setting-row">
-                      <div className="configuration-setting-control">
-                        <input
-                          type="checkbox"
-                          checked={settings.enableBrowserPrintFallback}
-                          onChange={(e) =>
-                            setSettings((p) => ({
-                              ...p,
-                              enableBrowserPrintFallback: e.target.checked
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="configuration-setting-copy">
-                        <span className="configuration-setting-title">Enable Browser Print Fallback</span>
-                        <span className="configuration-setting-description">
-                          Open browser print only when the selected bridge mode fails.
-                        </span>
-                      </div>
-                    </label>
-                    <SecondaryButton className="configuration-inline-btn" onClick={testAndroidBridge}>
-                      Test Android Bridge
-                    </SecondaryButton>
-                  </div>
-                </div>
-
-                <div className="configuration-pos-payment-block">
-                  <div className="configuration-uom-copy">
                     <h3 className="section-title configuration-subtitle">Checkout Defaults</h3>
                     <div className="field-help">
                       Set the default payment option that appears first when starting a new sale.
@@ -1428,11 +1304,6 @@ export function ConfigurationScreen() {
                         "allowPriceOverride",
                         "allowDiscountEntry",
                         "autoPrintReceipt",
-                        "printMode",
-                        "androidBridgeUrl",
-                        "androidBridgeHealthUrl",
-                        "androidBridgeToken",
-                        "enableBrowserPrintFallback",
                         "showCashierName",
                         "showChangeAmount",
                         "defaultPaymentMethod",

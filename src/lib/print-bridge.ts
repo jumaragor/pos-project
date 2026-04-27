@@ -38,11 +38,17 @@ function joinReceiptSubheader(receipt: ReceiptData) {
 }
 
 function paymentLabel(receipt: ReceiptData) {
-  const parts: string[] = [receipt.paymentMethod];
-  if (receipt.cashReceived != null) parts.push(`Cash ${receipt.cashReceived.toFixed(2)}`);
-  if (receipt.qrReceived != null && receipt.qrReceived > 0) parts.push(`QR ${receipt.qrReceived.toFixed(2)}`);
-  if (receipt.changeAmount != null) parts.push(`Change ${receipt.changeAmount.toFixed(2)}`);
-  return parts.join(" / ");
+  const lines: string[] = [`Payment Method: ${receipt.paymentMethod}`];
+  if (receipt.cashReceived != null && receipt.qrReceived != null && receipt.qrReceived > 0) {
+    lines.push(`Cash Amount: ${receipt.cashReceived.toFixed(2)}`);
+    lines.push(`QR Amount: ${receipt.qrReceived.toFixed(2)}`);
+  } else if (receipt.cashReceived != null) {
+    lines.push(`Payment Amount: ${receipt.cashReceived.toFixed(2)}`);
+  } else if (receipt.qrReceived != null && receipt.qrReceived > 0) {
+    lines.push(`Payment Amount: ${receipt.qrReceived.toFixed(2)}`);
+  }
+  if (receipt.changeAmount != null) lines.push(`Change: ${receipt.changeAmount.toFixed(2)}`);
+  return lines.join("\n");
 }
 
 function toBridgeReceipt(receipt: ReceiptData) {

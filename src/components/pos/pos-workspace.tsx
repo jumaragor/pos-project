@@ -11,7 +11,7 @@ import { ReceiptPrint } from "@/components/pos/receipt-print";
 import { CartLine, ProductLite } from "@/components/pos/types";
 import { SecondaryButton } from "@/components/ui/buttons";
 import { formatCurrency } from "@/lib/format";
-import { PrintMode, printReceipt } from "@/lib/print-service";
+import { isPrintBridgeConfigured, printReceiptViaBridge } from "@/lib/print-bridge";
 import { buildReceiptData, ReceiptSettings, ReceiptSource } from "@/lib/receipt";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/toast-provider";
@@ -42,11 +42,6 @@ type PosWorkspaceSettings = {
   lowStockThreshold: number;
   allowDiscountEntry: boolean;
   autoPrintReceipt: boolean;
-  printMode: PrintMode;
-  androidBridgeUrl: string;
-  androidBridgeHealthUrl: string;
-  androidBridgeToken: string;
-  enableBrowserPrintFallback: boolean;
   productDisplayMode: "tile" | "line";
   posProductsPerPage: number;
   receiptSettings: ReceiptSettings;
@@ -82,7 +77,7 @@ export function PosWorkspace({
   initialSettings: PosWorkspaceSettings;
 }) {
   const { data: session } = useSession();
-  const { success, warning, error } = useToast();
+  const { success, warning } = useToast();
   const [view, setView] = useState<"pos" | "transactions">("pos");
   const [enableProductCategories, setEnableProductCategories] = useState(initialSettings.enableProductCategories);
   const [enableCompatibleUnits, setEnableCompatibleUnits] = useState(initialSettings.enableCompatibleUnits);
@@ -91,17 +86,6 @@ export function PosWorkspace({
   const [lowStockThreshold, setLowStockThreshold] = useState(initialSettings.lowStockThreshold);
   const [allowDiscountEntry, setAllowDiscountEntry] = useState(initialSettings.allowDiscountEntry);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(initialSettings.autoPrintReceipt);
-  const [printMode, setPrintMode] = useState<PrintMode>(initialSettings.printMode ?? "browser");
-  const [androidBridgeUrl, setAndroidBridgeUrl] = useState(
-    initialSettings.androidBridgeUrl || "http://127.0.0.1:17890"
-  );
-  const [androidBridgeHealthUrl, setAndroidBridgeHealthUrl] = useState(
-    initialSettings.androidBridgeHealthUrl || "http://127.0.0.1:17890/health"
-  );
-  const [androidBridgeToken, setAndroidBridgeToken] = useState(initialSettings.androidBridgeToken || "");
-  const [enableBrowserPrintFallback, setEnableBrowserPrintFallback] = useState(
-    initialSettings.enableBrowserPrintFallback !== false
-  );
   const [productDisplayMode, setProductDisplayMode] = useState<"tile" | "line">(initialSettings.productDisplayMode);
   const [productsPerPage, setProductsPerPage] = useState(initialSettings.posProductsPerPage);
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(
@@ -172,15 +156,6 @@ export function PosWorkspace({
       setLowStockThreshold(Number(payload.lowStockThreshold ?? 10));
       setAllowDiscountEntry(payload.allowDiscountEntry !== false);
       setAutoPrintReceipt(payload.autoPrintReceipt === true);
-      setPrintMode(
-        ["browser", "windows-bridge", "android-escpos-bridge"].includes(String(payload.printMode))
-          ? (payload.printMode as PrintMode)
-          : "browser"
-      );
-      setAndroidBridgeUrl(String(payload.androidBridgeUrl ?? "http://127.0.0.1:17890"));
-      setAndroidBridgeHealthUrl(String(payload.androidBridgeHealthUrl ?? "http://127.0.0.1:17890/health"));
-      setAndroidBridgeToken(String(payload.androidBridgeToken ?? ""));
-      setEnableBrowserPrintFallback(payload.enableBrowserPrintFallback !== false);
       setProductDisplayMode(payload.productDisplayMode === "line" ? "line" : "tile");
       setProductsPerPage(Math.max(1, Number(payload.posProductsPerPage ?? 50)));
       setReceiptSettings({
@@ -299,24 +274,18 @@ export function PosWorkspace({
     async function printQueuedReceipt() {
       lastPrintedIdRef.current = queuedPrintId;
 
-      try {
-        const result = await printReceipt(receipt, {
-          printMode,
-          androidBridgeUrl,
-          androidBridgeHealthUrl,
-          androidBridgeToken,
-          enableBrowserPrintFallback
-        });
-        if (result.mode === "browser-fallback") {
-          warning(result.message);
-        } else {
-          success(result.message);
+      if (isPrintBridgeConfigured()) {
+        try {
+          await printReceiptViaBridge(receipt);
+          success("Receipt sent to printer");
+          return;
+        } catch (printError) {
+          console.warn("Printer bridge failed; falling back to browser print.", printError);
+          warning("Printer bridge unavailable. Opening browser print instead.");
         }
-      } catch (printError) {
-        const message = printError instanceof Error ? printError.message : "Failed to print receipt.";
-        console.warn("Receipt printing failed.", printError);
-        error(message);
       }
+
+      window.print();
     }
 
     // Wait for the shared receipt component to mount before printing or using browser fallback.
@@ -330,18 +299,7 @@ export function PosWorkspace({
       if (frameOne) window.cancelAnimationFrame(frameOne);
       if (frameTwo) window.cancelAnimationFrame(frameTwo);
     };
-  }, [
-    androidBridgeToken,
-    androidBridgeHealthUrl,
-    androidBridgeUrl,
-    enableBrowserPrintFallback,
-    error,
-    printMode,
-    printableReceipt,
-    queuedPrintId,
-    success,
-    warning
-  ]);
+  }, [printableReceipt, queuedPrintId, success, warning]);
 
   function addProduct(product: ProductLite) {
     setCart((prev) => {

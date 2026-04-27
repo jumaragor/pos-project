@@ -5,8 +5,6 @@ import { PaymentMethod } from "@prisma/client";
 import { useSession } from "next-auth/react";
 import { db } from "@/lib/offline-db";
 import { applyDiscount } from "@/lib/pricing";
-import { PrintMode, printReceipt } from "@/lib/print-service";
-import { ReceiptData } from "@/lib/receipt";
 import {
   normalizeDecimalInput,
   normalizeIntegerInput,
@@ -14,7 +12,6 @@ import {
   sanitizeIntegerInput,
   toNumber
 } from "@/lib/numeric-input";
-import { useToast } from "@/components/toast-provider";
 
 type ProductLite = {
   id: string;
@@ -57,23 +54,8 @@ type CompletedSale = {
   }>;
 };
 
-type LegacyPrintSettings = {
-  printMode: PrintMode;
-  androidBridgeUrl: string;
-  androidBridgeHealthUrl: string;
-  androidBridgeToken: string;
-  enableBrowserPrintFallback: boolean;
-  businessName: string;
-  storeName: string;
-  storeAddress: string;
-  storeContactNumber: string;
-  storeEmailAddress: string;
-  receiptFooterMessage: string;
-};
-
 export function POSScreen({ products, customers }: { products: ProductLite[]; customers: CustomerLite[] }) {
   const { data: session } = useSession();
-  const { success, warning, error } = useToast();
   const [query, setQuery] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
@@ -83,19 +65,6 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
   const [orderDiscountValue, setOrderDiscountValue] = useState<number>(0);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null);
-  const [printSettings, setPrintSettings] = useState<LegacyPrintSettings>({
-    printMode: "browser",
-    androidBridgeUrl: "http://127.0.0.1:17890",
-    androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
-    androidBridgeToken: "",
-    enableBrowserPrintFallback: true,
-    businessName: "MicroBiz POS",
-    storeName: "MicroBiz POS",
-    storeAddress: "",
-    storeContactNumber: "",
-    storeEmailAddress: "",
-    receiptFooterMessage: "Thank you for your purchase."
-  });
   const [recentTransactions, setRecentTransactions] = useState<
     Array<{ id: string; number: string; status: string; totalAmount: string }>
   >([]);
@@ -108,37 +77,6 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
 
   useEffect(() => {
     void loadTransactions();
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadPrintSettings() {
-      const response = await fetch("/api/settings");
-      if (!response.ok) return;
-      const payload = await response.json();
-      if (!mounted) return;
-      setPrintSettings({
-        printMode: ["browser", "windows-bridge", "android-escpos-bridge"].includes(String(payload.printMode))
-          ? (payload.printMode as PrintMode)
-          : "browser",
-        androidBridgeUrl: String(payload.androidBridgeUrl ?? "http://127.0.0.1:17890"),
-        androidBridgeHealthUrl: String(payload.androidBridgeHealthUrl ?? "http://127.0.0.1:17890/health"),
-        androidBridgeToken: String(payload.androidBridgeToken ?? ""),
-        enableBrowserPrintFallback: payload.enableBrowserPrintFallback !== false,
-        businessName: String(payload.businessName ?? "MicroBiz POS"),
-        storeName: String(payload.storeName ?? "MicroBiz POS"),
-        storeAddress: String(payload.storeAddress ?? ""),
-        storeContactNumber: String(payload.storeContactNumber ?? ""),
-        storeEmailAddress: String(payload.storeEmailAddress ?? ""),
-        receiptFooterMessage: String(payload.receiptFooterMessage ?? "Thank you for your purchase.")
-      });
-    }
-
-    void loadPrintSettings();
-    return () => {
-      mounted = false;
-    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -198,45 +136,8 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
     };
   }
 
-  function toReceiptData(sale: CompletedSale): ReceiptData {
-    return {
-      businessName: printSettings.businessName || printSettings.storeName,
-      tradeName: printSettings.storeName,
-      address: printSettings.storeAddress,
-      contactNumber: printSettings.storeContactNumber,
-      email: printSettings.storeEmailAddress,
-      transactionNumber: sale.txNumber,
-      createdAt: sale.createdAt,
-      cashierName: session?.user.name ?? session?.user.username ?? undefined,
-      customerName: sale.customerName,
-      paymentMethod: sale.paymentMethod,
-      subtotal: sale.subtotal,
-      discount: sale.discount,
-      total: sale.total,
-      cashReceived: sale.cashAmount,
-      qrReceived: sale.qrAmount,
-      changeAmount: sale.cashAmount != null ? Math.max(sale.cashAmount - sale.total, 0) : undefined,
-      footerMessage: printSettings.receiptFooterMessage,
-      items: sale.items.map((item) => ({
-        ...item,
-        unitPrice: item.qty ? item.lineTotal / item.qty : item.lineTotal
-      }))
-    };
-  }
-
-  async function printSaleTransaction(sale = completedSale) {
-    if (!sale) return;
-    try {
-      const result = await printReceipt(toReceiptData(sale), printSettings);
-      if (result.mode === "browser-fallback") {
-        warning(result.message);
-      } else {
-        success(result.message);
-      }
-    } catch (printError) {
-      const message = printError instanceof Error ? printError.message : "Failed to print receipt.";
-      error(message);
-    }
+  function printSaleTransaction() {
+    window.print();
   }
 
   async function submitSale() {
@@ -289,7 +190,7 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
       `Sale ${data.number} completed. Do you want to print the sale transaction now?`
     );
     if (shouldPrint) {
-      await printSaleTransaction(snapshot);
+      printSaleTransaction();
     }
   }
 
@@ -437,7 +338,7 @@ export function POSScreen({ products, customers }: { products: ProductLite[]; cu
               {completedSale.txNumber ? `Transaction ${completedSale.txNumber}` : "Pending Sync Transaction"}
             </div>
             <div>{completedSale.synced ? "Saved online." : "Saved offline. Will sync later."}</div>
-            <button onClick={() => void printSaleTransaction()}>Print Sale Transaction</button>
+            <button onClick={printSaleTransaction}>Print Sale Transaction</button>
           </div>
         ) : null}
       </div>

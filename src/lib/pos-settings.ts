@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import type { ReceiptSettings } from "@/lib/receipt";
-import type { PrintMode } from "@/lib/print-service";
 
 type PosSettingsSnapshot = {
   enableProductCategories: boolean;
@@ -10,11 +9,6 @@ type PosSettingsSnapshot = {
   lowStockThreshold: number;
   allowDiscountEntry: boolean;
   autoPrintReceipt: boolean;
-  printMode: PrintMode;
-  androidBridgeUrl: string;
-  androidBridgeHealthUrl: string;
-  androidBridgeToken: string;
-  enableBrowserPrintFallback: boolean;
   productDisplayMode: "tile" | "line";
   posProductsPerPage: number;
   receiptSettings: ReceiptSettings;
@@ -28,11 +22,6 @@ const defaultSettings = {
   lowStockThreshold: 10,
   allowDiscountEntry: true,
   autoPrintReceipt: false,
-  printMode: (process.env.NEXT_PUBLIC_PRINT_BRIDGE_TOKEN ? "windows-bridge" : "browser") as PrintMode,
-  androidBridgeUrl: "http://127.0.0.1:17890",
-  androidBridgeHealthUrl: "http://127.0.0.1:17890/health",
-  androidBridgeToken: "",
-  enableBrowserPrintFallback: true,
   productDisplayMode: "tile" as const,
   posProductsPerPage: 50,
   businessName: "",
@@ -82,11 +71,6 @@ export async function getPosSettings() {
             "lowStockThreshold",
             "allowDiscountEntry",
             "autoPrintReceipt",
-            "printMode",
-            "androidBridgeUrl",
-            "androidBridgeHealthUrl",
-            "androidBridgeToken",
-            "enableBrowserPrintFallback",
             "productDisplayMode",
             "posProductsPerPage",
             "businessName",
@@ -138,20 +122,6 @@ export async function getPosSettings() {
         autoPrintReceipt: toBoolean(
           valueByKey.get("autoPrintReceipt"),
           defaultSettings.autoPrintReceipt
-        ),
-        printMode: (["browser", "windows-bridge", "android-escpos-bridge"].includes(
-          valueByKey.get("printMode") ?? ""
-        )
-          ? valueByKey.get("printMode")
-          : defaultSettings.printMode) as PrintMode,
-        androidBridgeUrl: valueByKey.get("androidBridgeUrl") ?? defaultSettings.androidBridgeUrl,
-        androidBridgeHealthUrl:
-          valueByKey.get("androidBridgeHealthUrl") ?? defaultSettings.androidBridgeHealthUrl,
-        androidBridgeToken:
-          valueByKey.get("androidBridgeToken") ?? defaultSettings.androidBridgeToken,
-        enableBrowserPrintFallback: toBoolean(
-          valueByKey.get("enableBrowserPrintFallback"),
-          defaultSettings.enableBrowserPrintFallback
         ),
         productDisplayMode:
           valueByKey.get("productDisplayMode") === "line"

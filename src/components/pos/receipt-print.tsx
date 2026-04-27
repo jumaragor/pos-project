@@ -93,28 +93,30 @@ function ReceiptCopy({ data }: { data: ReceiptData }) {
         <span>TOTAL</span>
         <span>{formatCurrency(data.total)}</span>
       </div>
-      <div className="receipt-total-row">
-        <span>PAYMENT</span>
-        <span>{data.paymentMethod}</span>
+      <div className="receipt-payment-stack">
+        <div className="receipt-payment-line">
+          <span>PAYMENT METHOD</span>
+          <strong>{data.paymentMethod}</strong>
+        </div>
+        {data.cashReceived != null ? (
+          <div className="receipt-payment-line">
+            <span>PAYMENT AMOUNT</span>
+            <strong>{formatCurrency(data.cashReceived)}</strong>
+          </div>
+        ) : null}
+        {data.qrReceived != null && data.qrReceived > 0 ? (
+          <div className="receipt-payment-line">
+            <span>QR AMOUNT</span>
+            <strong>{formatCurrency(data.qrReceived)}</strong>
+          </div>
+        ) : null}
+        {data.changeAmount != null ? (
+          <div className="receipt-payment-line">
+            <span>CHANGE</span>
+            <strong>{formatCurrency(data.changeAmount)}</strong>
+          </div>
+        ) : null}
       </div>
-      {data.cashReceived != null ? (
-        <div className="receipt-total-row">
-          <span>CASH</span>
-          <span>{formatCurrency(data.cashReceived)}</span>
-        </div>
-      ) : null}
-      {data.qrReceived != null && data.qrReceived > 0 ? (
-        <div className="receipt-total-row">
-          <span>QR</span>
-          <span>{formatCurrency(data.qrReceived)}</span>
-        </div>
-      ) : null}
-      {data.changeAmount != null ? (
-        <div className="receipt-total-row">
-          <span>CHANGE</span>
-          <span>{formatCurrency(data.changeAmount)}</span>
-        </div>
-      ) : null}
       <div className="receipt-divider" />
       {data.footerMessage ? <div className="receipt-foot">{data.footerMessage}</div> : null}
     </section>
